@@ -1,0 +1,510 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"math"
+	"strconv"
+	"strings"
+	"time"
+
+	"simpletech-books/internal/security"
+)
+
+type Repository struct {
+	db *sql.DB
+}
+
+func New(db *sql.DB) *Repository {
+	return &Repository{db: db}
+}
+
+func (r *Repository) EnsureDefaultAdmin(ctx context.Context) error {
+	var count int
+	if err := r.db.QueryRowContext(ctx, `select count(*) from users`).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	hash, err := security.HashPassword("admin123")
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, `insert into users(username, display_name, password_hash, role) values('admin', 'Administrator', $1, 'admin')`, hash)
+	return err
+}
+
+func (r *Repository) GetUserByUsername(ctx context.Context, username string) (*User, error) {
+	var user User
+	err := r.db.QueryRowContext(ctx, `
+		select id, username, display_name, password_hash, role, active
+		from users
+		where lower(username) = lower($1) and active = true
+	`, strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.Active)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *Repository) ListCustomers(ctx context.Context, search string) ([]Customer, error) {
+	search = strings.TrimSpace(search)
+	rows, err := r.db.QueryContext(ctx, `
+		select id, full_name, company_name, email, phone, billing_address, service_address, tax_exempt, notes, created_at::text, updated_at::text
+		from customers
+		where $1 = '' or full_name ilike '%' || $1 || '%' or company_name ilike '%' || $1 || '%' or email ilike '%' || $1 || '%' or phone ilike '%' || $1 || '%'
+		order by updated_at desc, full_name asc
+		limit 200
+	`, search)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var customers []Customer
+	for rows.Next() {
+		var c Customer
+		if err := rows.Scan(&c.ID, &c.FullName, &c.CompanyName, &c.Email, &c.Phone, &c.BillingAddress, &c.ServiceAddress, &c.TaxExempt, &c.Notes, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		customers = append(customers, c)
+	}
+	return customers, rows.Err()
+}
+
+func (r *Repository) SaveCustomer(ctx context.Context, input CustomerInput) (*Customer, error) {
+	if strings.TrimSpace(input.FullName) == "" {
+		return nil, fmt.Errorf("customer full name is required")
+	}
+	var c Customer
+	if input.ID == 0 {
+		err := r.db.QueryRowContext(ctx, `
+			insert into customers(full_name, company_name, email, phone, billing_address, service_address, tax_exempt, notes)
+			values($1,$2,$3,$4,$5,$6,$7,$8)
+			returning id, full_name, company_name, email, phone, billing_address, service_address, tax_exempt, notes, created_at::text, updated_at::text
+		`, input.FullName, input.CompanyName, input.Email, input.Phone, input.BillingAddress, input.ServiceAddress, input.TaxExempt, input.Notes).
+			Scan(&c.ID, &c.FullName, &c.CompanyName, &c.Email, &c.Phone, &c.BillingAddress, &c.ServiceAddress, &c.TaxExempt, &c.Notes, &c.CreatedAt, &c.UpdatedAt)
+		return &c, err
+	}
+	err := r.db.QueryRowContext(ctx, `
+		update customers
+		set full_name=$1, company_name=$2, email=$3, phone=$4, billing_address=$5, service_address=$6, tax_exempt=$7, notes=$8, updated_at=now()
+		where id=$9
+		returning id, full_name, company_name, email, phone, billing_address, service_address, tax_exempt, notes, created_at::text, updated_at::text
+	`, input.FullName, input.CompanyName, input.Email, input.Phone, input.BillingAddress, input.ServiceAddress, input.TaxExempt, input.Notes, input.ID).
+		Scan(&c.ID, &c.FullName, &c.CompanyName, &c.Email, &c.Phone, &c.BillingAddress, &c.ServiceAddress, &c.TaxExempt, &c.Notes, &c.CreatedAt, &c.UpdatedAt)
+	return &c, err
+}
+
+func (r *Repository) DeleteCustomer(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `delete from customers where id=$1`, id)
+	return err
+}
+
+func (r *Repository) ListVendors(ctx context.Context, search string) ([]Vendor, error) {
+	search = strings.TrimSpace(search)
+	rows, err := r.db.QueryContext(ctx, `
+		select id, vendor_name, contact_name, email, phone, website, address, notes, created_at::text, updated_at::text
+		from vendors
+		where $1 = '' or vendor_name ilike '%' || $1 || '%' or contact_name ilike '%' || $1 || '%' or email ilike '%' || $1 || '%' or phone ilike '%' || $1 || '%'
+		order by updated_at desc, vendor_name asc
+		limit 200
+	`, search)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var vendors []Vendor
+	for rows.Next() {
+		var v Vendor
+		if err := rows.Scan(&v.ID, &v.VendorName, &v.ContactName, &v.Email, &v.Phone, &v.Website, &v.Address, &v.Notes, &v.CreatedAt, &v.UpdatedAt); err != nil {
+			return nil, err
+		}
+		vendors = append(vendors, v)
+	}
+	return vendors, rows.Err()
+}
+
+func (r *Repository) SaveVendor(ctx context.Context, input VendorInput) (*Vendor, error) {
+	if strings.TrimSpace(input.VendorName) == "" {
+		return nil, fmt.Errorf("vendor name is required")
+	}
+	var v Vendor
+	if input.ID == 0 {
+		err := r.db.QueryRowContext(ctx, `
+			insert into vendors(vendor_name, contact_name, email, phone, website, address, notes)
+			values($1,$2,$3,$4,$5,$6,$7)
+			returning id, vendor_name, contact_name, email, phone, website, address, notes, created_at::text, updated_at::text
+		`, input.VendorName, input.ContactName, input.Email, input.Phone, input.Website, input.Address, input.Notes).
+			Scan(&v.ID, &v.VendorName, &v.ContactName, &v.Email, &v.Phone, &v.Website, &v.Address, &v.Notes, &v.CreatedAt, &v.UpdatedAt)
+		return &v, err
+	}
+	err := r.db.QueryRowContext(ctx, `
+		update vendors
+		set vendor_name=$1, contact_name=$2, email=$3, phone=$4, website=$5, address=$6, notes=$7, updated_at=now()
+		where id=$8
+		returning id, vendor_name, contact_name, email, phone, website, address, notes, created_at::text, updated_at::text
+	`, input.VendorName, input.ContactName, input.Email, input.Phone, input.Website, input.Address, input.Notes, input.ID).
+		Scan(&v.ID, &v.VendorName, &v.ContactName, &v.Email, &v.Phone, &v.Website, &v.Address, &v.Notes, &v.CreatedAt, &v.UpdatedAt)
+	return &v, err
+}
+
+func (r *Repository) DeleteVendor(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `delete from vendors where id=$1`, id)
+	return err
+}
+
+func (r *Repository) CreateInvoice(ctx context.Context, input InvoiceInput) (*InvoiceDetail, error) {
+	if input.CustomerID == 0 {
+		return nil, fmt.Errorf("customer is required")
+	}
+	if len(input.Items) == 0 {
+		return nil, fmt.Errorf("at least one invoice line item is required")
+	}
+
+	invoiceDate, err := parseDate(input.InvoiceDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid invoice date")
+	}
+	dueDate, err := parseDate(input.DueDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid due date")
+	}
+	settings, err := r.GetSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	customer, err := r.getCustomer(ctx, input.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+
+	var subtotal, taxableSubtotal float64
+	for i := range input.Items {
+		item := &input.Items[i]
+		item.Description = strings.TrimSpace(item.Description)
+		if item.Description == "" {
+			return nil, fmt.Errorf("line item description is required")
+		}
+		if item.Quantity <= 0 {
+			item.Quantity = 1
+		}
+		if item.ItemType == "parts" {
+			item.Taxable = settings.PartsTaxable
+		}
+		if item.ItemType == "labor" {
+			item.Taxable = settings.LaborTaxable
+		}
+		lineTotal := roundMoney(item.Quantity * item.UnitPrice)
+		subtotal += lineTotal
+		if item.Taxable && !customer.TaxExempt {
+			taxableSubtotal += lineTotal
+		}
+	}
+	subtotal = roundMoney(subtotal)
+	discount := math.Max(0, roundMoney(input.DiscountAmount))
+	if discount > subtotal {
+		discount = subtotal
+	}
+	tax := roundMoney(math.Max(0, taxableSubtotal-discount) * settings.DefaultTaxRate)
+	total := roundMoney(subtotal - discount + tax)
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var sequence int64
+	if err := tx.QueryRowContext(ctx, `select nextval('invoice_number_seq')`).Scan(&sequence); err != nil {
+		return nil, err
+	}
+	invoiceNumber := fmt.Sprintf("%s-%06d", settings.InvoicePrefix, sequence)
+
+	var invoiceID int64
+	err = tx.QueryRowContext(ctx, `
+		insert into invoices(invoice_number, invoice_date, due_date, customer_id, subtotal, discount_amount, tax_amount, total_amount, notes, terms)
+		values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		returning id
+	`, invoiceNumber, invoiceDate, dueDate, input.CustomerID, subtotal, discount, tax, total, input.Notes, fallback(input.Terms, settings.InvoiceTerms)).Scan(&invoiceID)
+	if err != nil {
+		return nil, err
+	}
+
+	for position, item := range input.Items {
+		itemType := fallback(item.ItemType, "other")
+		lineTotal := roundMoney(item.Quantity * item.UnitPrice)
+		_, err := tx.ExecContext(ctx, `
+			insert into invoice_items(invoice_id, item_type, description, quantity, unit_price, taxable, line_total, position)
+			values($1,$2,$3,$4,$5,$6,$7,$8)
+		`, invoiceID, itemType, item.Description, item.Quantity, item.UnitPrice, item.Taxable, lineTotal, position)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.GetInvoice(ctx, invoiceID)
+}
+
+func (r *Repository) ListInvoices(ctx context.Context, search string) ([]InvoiceListItem, error) {
+	search = strings.TrimSpace(search)
+	rows, err := r.db.QueryContext(ctx, `
+		select i.id, i.invoice_number, i.invoice_date::text, i.due_date::text, c.full_name, i.status, i.total_amount, i.paid_amount, i.created_at::text
+		from invoices i
+		join customers c on c.id = i.customer_id
+		where $1 = '' or i.invoice_number ilike '%' || $1 || '%' or c.full_name ilike '%' || $1 || '%' or c.company_name ilike '%' || $1 || '%'
+		order by i.created_at desc
+		limit 200
+	`, search)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var invoices []InvoiceListItem
+	for rows.Next() {
+		var invoice InvoiceListItem
+		if err := rows.Scan(&invoice.ID, &invoice.InvoiceNumber, &invoice.InvoiceDate, &invoice.DueDate, &invoice.CustomerName, &invoice.Status, &invoice.TotalAmount, &invoice.PaidAmount, &invoice.CreatedAt); err != nil {
+			return nil, err
+		}
+		invoices = append(invoices, invoice)
+	}
+	return invoices, rows.Err()
+}
+
+func (r *Repository) GetInvoice(ctx context.Context, id int64) (*InvoiceDetail, error) {
+	var invoice InvoiceDetail
+	err := r.db.QueryRowContext(ctx, `
+		select i.id, i.invoice_number, i.invoice_date::text, i.due_date::text,
+			c.id, c.full_name, c.company_name, c.email, c.phone, c.billing_address, c.service_address, c.tax_exempt, c.notes, c.created_at::text, c.updated_at::text,
+			i.status, i.subtotal, i.discount_amount, i.tax_amount, i.total_amount, i.paid_amount, i.notes, i.terms, i.created_at::text, i.updated_at::text
+		from invoices i
+		join customers c on c.id = i.customer_id
+		where i.id=$1
+	`, id).Scan(
+		&invoice.ID, &invoice.InvoiceNumber, &invoice.InvoiceDate, &invoice.DueDate,
+		&invoice.Customer.ID, &invoice.Customer.FullName, &invoice.Customer.CompanyName, &invoice.Customer.Email, &invoice.Customer.Phone, &invoice.Customer.BillingAddress, &invoice.Customer.ServiceAddress, &invoice.Customer.TaxExempt, &invoice.Customer.Notes, &invoice.Customer.CreatedAt, &invoice.Customer.UpdatedAt,
+		&invoice.Status, &invoice.Subtotal, &invoice.DiscountAmount, &invoice.TaxAmount, &invoice.TotalAmount, &invoice.PaidAmount, &invoice.Notes, &invoice.Terms, &invoice.CreatedAt, &invoice.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		select id, invoice_id, item_type, description, quantity, unit_price, taxable, line_total, position
+		from invoice_items
+		where invoice_id=$1
+		order by position asc, id asc
+	`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item InvoiceItem
+		if err := rows.Scan(&item.ID, &item.InvoiceID, &item.ItemType, &item.Description, &item.Quantity, &item.UnitPrice, &item.Taxable, &item.LineTotal, &item.Position); err != nil {
+			return nil, err
+		}
+		invoice.Items = append(invoice.Items, item)
+	}
+	return &invoice, rows.Err()
+}
+
+func (r *Repository) ListCustomerLookup(ctx context.Context, search string, kind string) ([]CustomerLookup, error) {
+	search = strings.TrimSpace(search)
+	kind = strings.TrimSpace(strings.ToLower(kind))
+	rows, err := r.db.QueryContext(ctx, `
+		select c.id, c.full_name, c.company_name, c.email, c.phone, c.billing_address, c.service_address, c.tax_exempt, c.notes, c.created_at::text, c.updated_at::text,
+			count(i.id)::int as invoice_count,
+			coalesce(sum(i.total_amount), 0) as total_sales,
+			coalesce(max(i.invoice_date)::text, '') as last_invoice
+		from customers c
+		left join invoices i on i.customer_id = c.id
+		where $1 = '' or c.full_name ilike '%' || $1 || '%' or c.company_name ilike '%' || $1 || '%' or c.email ilike '%' || $1 || '%' or c.phone ilike '%' || $1 || '%'
+		group by c.id
+		having $2 = ''
+			or $2 = 'all'
+			or ($2 = 'repeat' and count(i.id) > 1)
+			or ($2 = 'new' and count(i.id) <= 1)
+		order by count(i.id) desc, max(i.invoice_date) desc nulls last, c.full_name asc
+		limit 500
+	`, search, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var customers []CustomerLookup
+	for rows.Next() {
+		var item CustomerLookup
+		if err := rows.Scan(&item.Customer.ID, &item.Customer.FullName, &item.Customer.CompanyName, &item.Customer.Email, &item.Customer.Phone, &item.Customer.BillingAddress, &item.Customer.ServiceAddress, &item.Customer.TaxExempt, &item.Customer.Notes, &item.Customer.CreatedAt, &item.Customer.UpdatedAt, &item.InvoiceCount, &item.TotalSales, &item.LastInvoice); err != nil {
+			return nil, err
+		}
+		item.Kind = "new"
+		if item.InvoiceCount > 1 {
+			item.Kind = "repeat"
+		}
+		customers = append(customers, item)
+	}
+	return customers, rows.Err()
+}
+
+func (r *Repository) SaveSettings(ctx context.Context, input AppSettings) (*AppSettings, error) {
+	values := map[string]string{
+		"business_name":      input.BusinessName,
+		"business_address":   input.BusinessAddress,
+		"business_phone":     input.BusinessPhone,
+		"business_email":     input.BusinessEmail,
+		"business_logo_path": input.BusinessLogoPath,
+		"default_tax_rate":   fmt.Sprintf("%.4f", input.DefaultTaxRate),
+		"parts_taxable":      strconv.FormatBool(input.PartsTaxable),
+		"labor_taxable":      strconv.FormatBool(input.LaborTaxable),
+		"invoice_terms":      input.InvoiceTerms,
+		"invoice_prefix":     fallback(input.InvoicePrefix, "INV"),
+		"theme":              fallback(input.Theme, "light"),
+		"smtp_host":          input.SMTPHost,
+		"smtp_port":          strconv.Itoa(input.SMTPPort),
+		"smtp_username":      input.SMTPUsername,
+		"smtp_password":      input.SMTPPassword,
+		"smtp_from_email":    input.SMTPFromEmail,
+		"smtp_from_name":     input.SMTPFromName,
+		"smtp_use_tls":       strconv.FormatBool(input.SMTPUseTLS),
+	}
+	for key, value := range values {
+		_, err := r.db.ExecContext(ctx, `
+			insert into settings(key, value, updated_at)
+			values($1, $2, now())
+			on conflict (key) do update set value = excluded.value, updated_at = now()
+		`, key, value)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return r.GetSettings(ctx)
+}
+func (r *Repository) GetSettings(ctx context.Context) (*AppSettings, error) {
+	rows, err := r.db.QueryContext(ctx, `select key, value from settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	values := map[string]string{}
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		values[key] = value
+	}
+	settings := &AppSettings{
+		BusinessName:     fallback(values["business_name"], "SimpleTech Books"),
+		BusinessAddress:  values["business_address"],
+		BusinessPhone:    values["business_phone"],
+		BusinessEmail:    values["business_email"],
+		BusinessLogoPath: values["business_logo_path"],
+		DefaultTaxRate:   parseFloat(values["default_tax_rate"]),
+		PartsTaxable:     parseBool(values["parts_taxable"], true),
+		LaborTaxable:     parseBool(values["labor_taxable"], false),
+		InvoiceTerms:     values["invoice_terms"],
+		InvoicePrefix:    fallback(values["invoice_prefix"], "INV"),
+		Theme:            fallback(values["theme"], "light"),
+		SMTPHost:         values["smtp_host"],
+		SMTPPort:         parseInt(values["smtp_port"], 587),
+		SMTPUsername:     values["smtp_username"],
+		SMTPPassword:     values["smtp_password"],
+		SMTPFromEmail:    values["smtp_from_email"],
+		SMTPFromName:     values["smtp_from_name"],
+		SMTPUseTLS:       parseBool(values["smtp_use_tls"], true),
+	}
+	return settings, rows.Err()
+}
+
+func (r *Repository) GetDashboard(ctx context.Context) (*DashboardSummary, error) {
+	summary := &DashboardSummary{}
+	_ = r.db.QueryRowContext(ctx, `select coalesce(sum(total_amount - paid_amount), 0) from invoices where status <> 'paid'`).Scan(&summary.TotalUnpaidInvoices)
+	_ = r.db.QueryRowContext(ctx, `select count(*) from invoices where status = 'paid' and date_trunc('month', invoice_date) = date_trunc('month', current_date)`).Scan(&summary.PaidInvoicesMonth)
+	_ = r.db.QueryRowContext(ctx, `select coalesce(sum(total_amount), 0) from invoices where date_trunc('month', invoice_date) = date_trunc('month', current_date)`).Scan(&summary.TotalSalesMonth)
+	_ = r.db.QueryRowContext(ctx, `select coalesce(sum(amount), 0) from purchases where date_trunc('month', purchase_date) = date_trunc('month', current_date)`).Scan(&summary.PurchasesMonth)
+	_ = r.db.QueryRowContext(ctx, `select coalesce(sum(tax_amount), 0) from invoices where date_trunc('month', invoice_date) = date_trunc('month', current_date)`).Scan(&summary.SalesTaxCollected)
+	invoices, err := r.ListInvoices(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	if len(invoices) > 8 {
+		invoices = invoices[:8]
+	}
+	customers, err := r.ListCustomers(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	if len(customers) > 8 {
+		customers = customers[:8]
+	}
+	summary.RecentInvoices = invoices
+	summary.RecentCustomers = customers
+	return summary, nil
+}
+
+func (r *Repository) getCustomer(ctx context.Context, id int64) (*Customer, error) {
+	var c Customer
+	err := r.db.QueryRowContext(ctx, `
+		select id, full_name, company_name, email, phone, billing_address, service_address, tax_exempt, notes, created_at::text, updated_at::text
+		from customers where id=$1
+	`, id).Scan(&c.ID, &c.FullName, &c.CompanyName, &c.Email, &c.Phone, &c.BillingAddress, &c.ServiceAddress, &c.TaxExempt, &c.Notes, &c.CreatedAt, &c.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func parseDate(value string) (time.Time, error) {
+	if strings.TrimSpace(value) == "" {
+		return time.Now(), nil
+	}
+	return time.Parse("2006-01-02", value)
+}
+
+func parseFloat(value string) float64 {
+	parsed, _ := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	return parsed
+}
+
+func parseInt(value string, defaultValue int) int {
+	if strings.TrimSpace(value) == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+func parseBool(value string, defaultValue bool) bool {
+	if strings.TrimSpace(value) == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+func roundMoney(value float64) float64 {
+	return math.Round(value*100) / 100
+}
+
+func fallback(value string, defaultValue string) string {
+	if strings.TrimSpace(value) == "" {
+		return defaultValue
+	}
+	return value
+}

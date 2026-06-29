@@ -1,0 +1,309 @@
+﻿:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #17211c;
+  background: #f5f7f6;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 980px; min-height: 100vh; }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }
+
+.app, .loginPage {
+  min-height: 100vh;
+  background: #f5f7f6;
+  color: #17211c;
+}
+.app.dark, .loginPage.dark {
+  background: #151918;
+  color: #edf2ef;
+}
+
+.app { display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+.sidebar {
+  min-height: 100vh;
+  padding: 18px 14px;
+  background: #ffffff;
+  border-right: 1px solid #dce4df;
+}
+.dark .sidebar { background: #1d2421; border-color: #334139; }
+.brand { display: flex; gap: 12px; align-items: center; padding: 8px 8px 20px; }
+.brand span { display: block; color: #5e7067; font-size: 13px; margin-top: 2px; }
+.dark .brand span { color: #aab7b0; }
+.brandMark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #1f6f58;
+  font-weight: 800;
+}
+nav { display: grid; gap: 3px; }
+.navItem {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: #314139;
+  background: transparent;
+  text-align: left;
+}
+.navItem:hover { background: #eef3f0; }
+.navItem.active { background: #dcefe7; color: #174d3f; font-weight: 700; }
+.dark .navItem { color: #dce5e0; }
+.dark .navItem:hover { background: #27322d; }
+.dark .navItem.active { background: #24483d; color: #ffffff; }
+
+.main { min-width: 0; padding: 22px 26px 36px; }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
+.topbar h1 { margin: 0; font-size: 26px; line-height: 1.15; }
+.topbar p { margin: 5px 0 0; color: #65776e; font-size: 13px; }
+.dark .topbar p { color: #aebbb5; }
+.topActions, .formActions { display: flex; align-items: center; gap: 8px; }
+
+.loginPage { display: grid; place-items: center; padding: 24px; }
+.loginPanel {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #dce4df;
+  border-radius: 8px;
+  box-shadow: 0 18px 55px rgba(32, 47, 40, 0.12);
+}
+.dark .loginPanel { background: #1d2421; border-color: #334139; }
+.loginHeader { display: flex; align-items: center; justify-content: space-between; }
+.loginPanel h1 { margin: 4px 0 6px; font-size: 28px; }
+
+.contentStack { display: grid; gap: 18px; }
+.metricGrid { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 12px; }
+.metric, .listPanel, .formPanel, .workList, .placeholder {
+  background: #ffffff;
+  border: 1px solid #dce4df;
+  border-radius: 8px;
+}
+.dark .metric, .dark .listPanel, .dark .formPanel, .dark .workList, .dark .placeholder { background: #1d2421; border-color: #334139; }
+.metric { min-height: 96px; padding: 16px; display: grid; align-content: space-between; }
+.metric span { color: #607168; font-size: 13px; }
+.metric strong { font-size: 24px; line-height: 1.1; }
+.twoColumn { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.listPanel { padding: 14px; min-height: 240px; }
+
+.splitWorkArea { display: grid; grid-template-columns: minmax(420px, 1fr) minmax(420px, 0.9fr); gap: 16px; align-items: start; }
+.invoiceGrid { display: grid; grid-template-columns: minmax(520px, 1fr) minmax(420px, 0.8fr); gap: 16px; align-items: start; }
+.workList, .formPanel { padding: 16px; }
+.formPanel { display: grid; gap: 12px; }
+.sectionTitle { min-height: 32px; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+
+label { display: grid; gap: 6px; color: #425249; font-size: 13px; font-weight: 650; }
+.dark label { color: #cbd6d0; }
+input, textarea, select {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #cbd7d1;
+  border-radius: 6px;
+  color: #17211c;
+  background: #ffffff;
+  outline: none;
+}
+textarea { min-height: 78px; resize: vertical; }
+.dark input, .dark textarea, .dark select { color: #edf2ef; background: #151918; border-color: #3f5148; }
+input:focus, textarea:focus, select:focus { border-color: #1f6f58; box-shadow: 0 0 0 3px rgba(31, 111, 88, 0.14); }
+.fieldRow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.checkRow { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+.checkRow input { width: 16px; min-height: 16px; }
+
+.searchBox { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 8px; margin-bottom: 12px; }
+.tableList { display: grid; gap: 8px; }
+.rowButton, .invoiceRow, .simpleRow {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2e9e5;
+  border-radius: 6px;
+  background: #fbfcfb;
+  color: inherit;
+  text-align: left;
+}
+.dark .rowButton, .dark .invoiceRow, .dark .simpleRow { background: #18201d; border-color: #314039; }
+.rowButton:hover { border-color: #1f6f58; }
+.rowButton small, .invoiceRow small { display: block; color: #66786f; margin-top: 3px; }
+.dark .rowButton small, .dark .invoiceRow small { color: #aebbb5; }
+
+.primaryButton, .ghostButton, .dangerButton, .iconButton {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+.primaryButton { background: #1f6f58; color: #ffffff; font-weight: 750; }
+.primaryButton:hover { background: #185845; }
+.ghostButton { background: #ffffff; border-color: #cbd7d1; color: #21332b; }
+.dark .ghostButton { background: #1d2421; color: #edf2ef; border-color: #44564d; }
+.dangerButton { background: #fff5f3; border-color: #efb7ad; color: #a13725; }
+.dark .dangerButton { background: #3a221f; border-color: #7f463b; color: #ffb8aa; }
+.iconButton { width: 38px; padding: 0; background: #ffffff; border-color: #cbd7d1; color: #21332b; }
+.dark .iconButton { background: #1d2421; color: #edf2ef; border-color: #44564d; }
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.notice, .error, .stateMessage {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.notice { background: #e6f4ed; color: #174d3f; }
+.error { background: #fff0ee; color: #9a2d1c; }
+.stateMessage { background: #f0f4f2; color: #5c7066; }
+.dark .notice { background: #223d33; color: #c7f3df; }
+.dark .error { background: #40221e; color: #ffc3b8; }
+.dark .stateMessage { background: #25302b; color: #becac4; }
+
+.lineEditor { display: grid; gap: 8px; }
+.invoiceLine { display: grid; grid-template-columns: 110px minmax(150px, 1fr) 74px 96px 76px 38px; gap: 8px; align-items: end; }
+.invoiceLine label { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; border: 1px solid #cbd7d1; border-radius: 6px; }
+.invoiceLine label input { width: 15px; min-height: 15px; }
+.invoiceTotal { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-radius: 6px; background: #eef3f0; }
+.dark .invoiceTotal { background: #26312c; }
+.placeholder { max-width: 760px; padding: 22px; display: grid; gap: 10px; }
+.placeholder h2 { margin: 0 0 6px; }
+
+@media (max-width: 1100px) {
+  body { min-width: 760px; }
+  .app { grid-template-columns: 220px minmax(0, 1fr); }
+  .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .splitWorkArea, .invoiceGrid, .twoColumn { grid-template-columns: 1fr; }
+}
+
+.compactMetrics {
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+}
+.lookupToolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+.segmented {
+  min-height: 38px;
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid #cbd7d1;
+  border-radius: 7px;
+  background: #ffffff;
+}
+.dark .segmented {
+  background: #151918;
+  border-color: #44564d;
+}
+.segmented button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  color: #314139;
+  background: transparent;
+}
+.segmented button.active {
+  background: #dcefe7;
+  color: #174d3f;
+  font-weight: 750;
+}
+.dark .segmented button { color: #dce5e0; }
+.dark .segmented button.active { background: #24483d; color: #ffffff; }
+.lookupRow {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1fr) 110px 110px 86px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2e9e5;
+  border-radius: 6px;
+  background: #fbfcfb;
+}
+.dark .lookupRow { background: #18201d; border-color: #314039; }
+.lookupRow small { display: block; color: #66786f; margin-top: 3px; }
+.dark .lookupRow small { color: #aebbb5; }
+.pill {
+  width: fit-content;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #eef3f0;
+  color: #425249;
+  font-size: 12px;
+  font-weight: 750;
+}
+.pill.success {
+  background: #dcefe7;
+  color: #174d3f;
+}
+.dark .pill { background: #26312c; color: #dce5e0; }
+.dark .pill.success { background: #24483d; color: #ffffff; }
+.rowActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.settingsGrid {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(420px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.logoPicker {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+.logoPreview {
+  width: 74px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #cbd7d1;
+  border-radius: 7px;
+  background: #f8faf9;
+  color: #607168;
+  overflow: hidden;
+}
+.dark .logoPreview { background: #151918; border-color: #44564d; color: #aebbb5; }
+.logoPreview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+@media (max-width: 1100px) {
+  .settingsGrid, .lookupToolbar { grid-template-columns: 1fr; }
+  .lookupRow { grid-template-columns: minmax(180px, 1fr) minmax(160px, 1fr); }
+}

@@ -1,0 +1,19 @@
+{
+    "$schema":  "https://wails.io/schemas/config.v2.json",
+    "name":  "SimpleTech Books",
+    "outputfilename":  "SimpleTechBooks",
+    "frontend:install":  "npm.cmd install",
+    "frontend:build":  "npm.cmd run build",
+    "frontend:dev:watcher":  "npm.cmd run dev",
+    "frontend:dev:serverUrl":  "http://localhost:5173",
+    "author":  {
+                   "name":  "SimpleTech Books"
+               },
+    "info":  {
+                 "companyName":  "SimpleTech Books",
+                 "productName":  "SimpleTech Books",
+                 "productVersion":  "0.1.0",
+                 "copyright":  "Copyright 2026 SimpleTech Books",
+                 "comments":  "Local-first invoicing and purchase tracking desktop app."
+             }
+}

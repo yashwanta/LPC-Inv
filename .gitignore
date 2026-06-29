@@ -1,0 +1,15 @@
+bin/
+build/bin/
+frontend/dist/
+frontend/node_modules/
+.wails/
+.env
+*.log
+*.tmp
+*.bak
+*.exe
+*.test
+coverage.out
+.gocache/
+dist/
+.tmp/
