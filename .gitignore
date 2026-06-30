@@ -13,3 +13,4 @@ coverage.out
 .gocache/
 dist/
 .tmp/
+cmd/installer/payload/*.exe

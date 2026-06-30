@@ -1,4 +1,4 @@
-﻿name: Build and Package SimpleTech Books
+name: Build and Package SimpleTech Books
 
 on:
   push:
@@ -34,33 +34,30 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install Wails CLI
+        shell: cmd
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
-
-      - name: Run Go build
-        run: go build ./...
-
-      - name: Package artifact
-        shell: pwsh
-        run: ./scripts/package-windows.ps1
+      - name: Build and package
+        shell: cmd
+        run: scripts\package-windows.cmd
 
       - name: Read version
         id: version
-        shell: pwsh
+        shell: cmd
         run: |
-          $version = (Get-Content VERSION -Raw).Trim()
-          "version=$version" >> $env:GITHUB_OUTPUT
+          set /p VERSION=<VERSION
+          echo version=%VERSION%>>%GITHUB_OUTPUT%
 
-      - name: Upload package
+      - name: Upload app zip
         uses: actions/upload-artifact@v4
         with:
           name: SimpleTechBooks-${{ steps.version.outputs.version }}-windows-amd64
           path: dist/SimpleTechBooks-${{ steps.version.outputs.version }}-windows-amd64.zip
           if-no-files-found: error
 
-
+      - name: Upload setup exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimpleTechBooks-Setup-${{ steps.version.outputs.version }}
+          path: dist/SimpleTechBooks-Setup-${{ steps.version.outputs.version }}.exe
+          if-no-files-found: error

@@ -1,4 +1,4 @@
-# SimpleTech Books
+﻿# SimpleTech Books
 
 SimpleTech Books is a local-first Windows desktop invoicing and purchase tracking app for a small computer repair and parts business.
 
@@ -36,6 +36,27 @@ If no users exist, the app creates a default admin user:
 - Password: `admin123`
 
 Change this password after first login.
+
+
+## Downloadable Windows Setup
+
+GitHub Actions builds two Windows artifacts:
+
+- `SimpleTechBooks-Setup-<version>.exe`: click-to-run setup. It installs the app under `%LOCALAPPDATA%\SimpleTech Books`, creates a Start Menu launcher, and attempts to install runtime dependencies with `winget`.
+- `SimpleTechBooks-<version>-windows-amd64.zip`: portable app zip containing `SimpleTechBooks.exe`.
+
+The setup exe installs runtime prerequisites for normal use:
+
+- Microsoft Edge WebView2 Runtime
+- PostgreSQL
+
+For a development computer, run the setup exe from `cmd.exe` with `--dev` to also install Git, Go, Node.js LTS, and Wails where possible:
+
+```cmd
+SimpleTechBooks-Setup-0.1.0.exe --dev
+```
+
+No PowerShell is required for the setup exe or the `.cmd` package script.
 
 ## Development
 
@@ -75,3 +96,4 @@ wails dev
 - Phase 4: tax settings and tax reports
 - Phase 5: backup/restore, auto backup, backup history
 - Phase 6: email invoices, receipt attachments, search/filter polish
+
