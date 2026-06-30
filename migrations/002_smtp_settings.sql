@@ -1,4 +1,4 @@
-﻿insert into settings(key, value) values
+insert into settings(key, value) values
 	('smtp_host', ''),
 	('smtp_port', '587'),
 	('smtp_username', ''),

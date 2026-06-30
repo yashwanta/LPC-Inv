@@ -159,6 +159,22 @@ type DashboardSummary struct {
 	RecentCustomers     []Customer        `json:"recentCustomers"`
 }
 
+type IncomeExpenseReport struct {
+	Period       string                    `json:"period"`
+	Year         int                       `json:"year"`
+	TotalIncome  float64                   `json:"totalIncome"`
+	TotalExpense float64                   `json:"totalExpense"`
+	NetIncome    float64                   `json:"netIncome"`
+	Rows         []IncomeExpenseReportItem `json:"rows"`
+}
+
+type IncomeExpenseReportItem struct {
+	Label   string  `json:"label"`
+	Income  float64 `json:"income"`
+	Expense float64 `json:"expense"`
+	Net     float64 `json:"net"`
+}
+
 type CustomerLookup struct {
 	Customer     Customer `json:"customer"`
 	InvoiceCount int      `json:"invoiceCount"`

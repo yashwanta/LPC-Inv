@@ -48,7 +48,10 @@ GitHub Actions builds two Windows artifacts:
 The setup exe installs runtime prerequisites for normal use:
 
 - Microsoft Edge WebView2 Runtime
-- PostgreSQL
+- PostgreSQL Server
+- PostgreSQL command-line tools, including `psql.exe`
+
+The installer also verifies whether `psql.exe` can be found after PostgreSQL installation. If PostgreSQL is installed but `psql.exe` is not on `PATH`, setup creates a helper command in the app install directory for support/reset commands.
 
 For a development computer, run the setup exe from `cmd.exe` with `--dev` to also install Git, Go, Node.js LTS, and Wails where possible:
 

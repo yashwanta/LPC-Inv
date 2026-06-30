@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
+	"io/fs"
+	"net/http"
 	"net/smtp"
+	"os"
 	"strings"
 
 	"simpletech-books/internal/database"
@@ -17,17 +21,22 @@ import (
 )
 
 type App struct {
-	ctx  context.Context
-	repo *repository.Repository
+	ctx        context.Context
+	repo       *repository.Repository
+	migrations fs.FS
 }
 
-func NewApp() *App {
-	return &App{}
+func NewApp(migrations ...fs.FS) *App {
+	var migrationFS fs.FS
+	if len(migrations) > 0 {
+		migrationFS = migrations[0]
+	}
+	return &App{migrations: migrationFS}
 }
 
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
-	db, err := database.Open(ctx)
+	db, err := database.Open(ctx, a.migrations)
 	if err != nil {
 		fmt.Printf("database startup failed: %v\n", err)
 		return
@@ -70,6 +79,13 @@ func (a *App) GetDashboard() (*repository.DashboardSummary, error) {
 		return nil, err
 	}
 	return a.repo.GetDashboard(a.ctx)
+}
+
+func (a *App) GetIncomeExpenseReport(period string, year int) (*repository.IncomeExpenseReport, error) {
+	if err := a.healthCheck(); err != nil {
+		return nil, err
+	}
+	return a.repo.GetIncomeExpenseReport(a.ctx, period, year)
 }
 
 func (a *App) ListCustomers(search string) ([]repository.Customer, error) {
@@ -181,6 +197,19 @@ func (a *App) SelectBusinessLogo() (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+func (a *App) GetImageDataURL(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	contentType := http.DetectContentType(data)
+	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
 func (a *App) EmailInvoice(input repository.EmailInvoiceInput) error {

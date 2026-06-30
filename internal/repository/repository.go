@@ -63,7 +63,7 @@ func (r *Repository) ListCustomers(ctx context.Context, search string) ([]Custom
 	}
 	defer rows.Close()
 
-	var customers []Customer
+	customers := []Customer{}
 	for rows.Next() {
 		var c Customer
 		if err := rows.Scan(&c.ID, &c.FullName, &c.CompanyName, &c.Email, &c.Phone, &c.BillingAddress, &c.ServiceAddress, &c.TaxExempt, &c.Notes, &c.CreatedAt, &c.UpdatedAt); err != nil {
@@ -117,7 +117,7 @@ func (r *Repository) ListVendors(ctx context.Context, search string) ([]Vendor, 
 	}
 	defer rows.Close()
 
-	var vendors []Vendor
+	vendors := []Vendor{}
 	for rows.Next() {
 		var v Vendor
 		if err := rows.Scan(&v.ID, &v.VendorName, &v.ContactName, &v.Email, &v.Phone, &v.Website, &v.Address, &v.Notes, &v.CreatedAt, &v.UpdatedAt); err != nil {
@@ -267,7 +267,7 @@ func (r *Repository) ListInvoices(ctx context.Context, search string) ([]Invoice
 	}
 	defer rows.Close()
 
-	var invoices []InvoiceListItem
+	invoices := []InvoiceListItem{}
 	for rows.Next() {
 		var invoice InvoiceListItem
 		if err := rows.Scan(&invoice.ID, &invoice.InvoiceNumber, &invoice.InvoiceDate, &invoice.DueDate, &invoice.CustomerName, &invoice.Status, &invoice.TotalAmount, &invoice.PaidAmount, &invoice.CreatedAt); err != nil {
@@ -340,7 +340,7 @@ func (r *Repository) ListCustomerLookup(ctx context.Context, search string, kind
 	}
 	defer rows.Close()
 
-	var customers []CustomerLookup
+	customers := []CustomerLookup{}
 	for rows.Next() {
 		var item CustomerLookup
 		if err := rows.Scan(&item.Customer.ID, &item.Customer.FullName, &item.Customer.CompanyName, &item.Customer.Email, &item.Customer.Phone, &item.Customer.BillingAddress, &item.Customer.ServiceAddress, &item.Customer.TaxExempt, &item.Customer.Notes, &item.Customer.CreatedAt, &item.Customer.UpdatedAt, &item.InvoiceCount, &item.TotalSales, &item.LastInvoice); err != nil {
@@ -427,7 +427,10 @@ func (r *Repository) GetSettings(ctx context.Context) (*AppSettings, error) {
 }
 
 func (r *Repository) GetDashboard(ctx context.Context) (*DashboardSummary, error) {
-	summary := &DashboardSummary{}
+	summary := &DashboardSummary{
+		RecentInvoices:  []InvoiceListItem{},
+		RecentCustomers: []Customer{},
+	}
 	_ = r.db.QueryRowContext(ctx, `select coalesce(sum(total_amount - paid_amount), 0) from invoices where status <> 'paid'`).Scan(&summary.TotalUnpaidInvoices)
 	_ = r.db.QueryRowContext(ctx, `select count(*) from invoices where status = 'paid' and date_trunc('month', invoice_date) = date_trunc('month', current_date)`).Scan(&summary.PaidInvoicesMonth)
 	_ = r.db.QueryRowContext(ctx, `select coalesce(sum(total_amount), 0) from invoices where date_trunc('month', invoice_date) = date_trunc('month', current_date)`).Scan(&summary.TotalSalesMonth)
@@ -450,6 +453,109 @@ func (r *Repository) GetDashboard(ctx context.Context) (*DashboardSummary, error
 	summary.RecentInvoices = invoices
 	summary.RecentCustomers = customers
 	return summary, nil
+}
+
+func (r *Repository) GetIncomeExpenseReport(ctx context.Context, period string, year int) (*IncomeExpenseReport, error) {
+	period = strings.ToLower(strings.TrimSpace(period))
+	if period != "yearly" {
+		period = "monthly"
+	}
+	if year == 0 {
+		year = time.Now().Year()
+	}
+
+	if period == "yearly" {
+		return r.getYearlyIncomeExpenseReport(ctx, year)
+	}
+	return r.getMonthlyIncomeExpenseReport(ctx, year)
+}
+
+func (r *Repository) getMonthlyIncomeExpenseReport(ctx context.Context, year int) (*IncomeExpenseReport, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		with months as (
+			select generate_series(1, 12) as month_number
+		),
+		income as (
+			select extract(month from invoice_date)::int as month_number, coalesce(sum(total_amount), 0) as amount
+			from invoices
+			where extract(year from invoice_date)::int = $1
+			group by extract(month from invoice_date)::int
+		),
+		expenses as (
+			select extract(month from purchase_date)::int as month_number, coalesce(sum(amount), 0) as amount
+			from purchases
+			where extract(year from purchase_date)::int = $1
+			group by extract(month from purchase_date)::int
+		)
+		select to_char(make_date($1, months.month_number, 1), 'Mon') as label,
+			coalesce(income.amount, 0) as income,
+			coalesce(expenses.amount, 0) as expense
+		from months
+		left join income on income.month_number = months.month_number
+		left join expenses on expenses.month_number = months.month_number
+		order by months.month_number
+	`, year)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanIncomeExpenseReport(rows, "monthly", year)
+}
+
+func (r *Repository) getYearlyIncomeExpenseReport(ctx context.Context, year int) (*IncomeExpenseReport, error) {
+	startYear := year - 4
+	rows, err := r.db.QueryContext(ctx, `
+		with years as (
+			select generate_series($1, $2) as report_year
+		),
+		income as (
+			select extract(year from invoice_date)::int as report_year, coalesce(sum(total_amount), 0) as amount
+			from invoices
+			where extract(year from invoice_date)::int between $1 and $2
+			group by extract(year from invoice_date)::int
+		),
+		expenses as (
+			select extract(year from purchase_date)::int as report_year, coalesce(sum(amount), 0) as amount
+			from purchases
+			where extract(year from purchase_date)::int between $1 and $2
+			group by extract(year from purchase_date)::int
+		)
+		select years.report_year::text as label,
+			coalesce(income.amount, 0) as income,
+			coalesce(expenses.amount, 0) as expense
+		from years
+		left join income on income.report_year = years.report_year
+		left join expenses on expenses.report_year = years.report_year
+		order by years.report_year
+	`, startYear, year)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanIncomeExpenseReport(rows, "yearly", year)
+}
+
+func scanIncomeExpenseReport(rows *sql.Rows, period string, year int) (*IncomeExpenseReport, error) {
+	report := &IncomeExpenseReport{
+		Period: period,
+		Year:   year,
+		Rows:   []IncomeExpenseReportItem{},
+	}
+	for rows.Next() {
+		var item IncomeExpenseReportItem
+		if err := rows.Scan(&item.Label, &item.Income, &item.Expense); err != nil {
+			return nil, err
+		}
+		item.Net = roundMoney(item.Income - item.Expense)
+		report.TotalIncome = roundMoney(report.TotalIncome + item.Income)
+		report.TotalExpense = roundMoney(report.TotalExpense + item.Expense)
+		report.Rows = append(report.Rows, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	report.NetIncome = roundMoney(report.TotalIncome - report.TotalExpense)
+	return report, nil
 }
 
 func (r *Repository) getCustomer(ctx context.Context, id int64) (*Customer, error) {

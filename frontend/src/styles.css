@@ -86,12 +86,12 @@ nav { display: grid; gap: 3px; }
 
 .contentStack { display: grid; gap: 18px; }
 .metricGrid { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 12px; }
-.metric, .listPanel, .formPanel, .workList, .placeholder {
+.metric, .listPanel, .formPanel, .workList, .placeholder, .reportPanel {
   background: #ffffff;
   border: 1px solid #dce4df;
   border-radius: 8px;
 }
-.dark .metric, .dark .listPanel, .dark .formPanel, .dark .workList, .dark .placeholder { background: #1d2421; border-color: #334139; }
+.dark .metric, .dark .listPanel, .dark .formPanel, .dark .workList, .dark .placeholder, .dark .reportPanel { background: #1d2421; border-color: #334139; }
 .metric { min-height: 96px; padding: 16px; display: grid; align-content: space-between; }
 .metric span { color: #607168; font-size: 13px; }
 .metric strong { font-size: 24px; line-height: 1.1; }
@@ -99,9 +99,9 @@ nav { display: grid; gap: 3px; }
 .listPanel { padding: 14px; min-height: 240px; }
 
 .splitWorkArea { display: grid; grid-template-columns: minmax(420px, 1fr) minmax(420px, 0.9fr); gap: 16px; align-items: start; }
-.invoiceGrid { display: grid; grid-template-columns: minmax(520px, 1fr) minmax(420px, 0.8fr); gap: 16px; align-items: start; }
+.invoiceGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 0.8fr); gap: 16px; align-items: start; }
 .workList, .formPanel { padding: 16px; }
-.formPanel { display: grid; gap: 12px; }
+.formPanel { min-width: 0; display: grid; gap: 12px; }
 .sectionTitle { min-height: 32px; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 
 label { display: grid; gap: 6px; color: #425249; font-size: 13px; font-weight: 650; }
@@ -180,19 +180,97 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .dark .stateMessage { background: #25302b; color: #becac4; }
 
 .lineEditor { display: grid; gap: 8px; }
-.invoiceLine { display: grid; grid-template-columns: 110px minmax(150px, 1fr) 74px 96px 76px 38px; gap: 8px; align-items: end; }
+.invoiceLine { display: grid; grid-template-columns: minmax(84px, 0.9fr) minmax(110px, 1.5fr) minmax(54px, 0.55fr) minmax(70px, 0.7fr) 62px 38px; gap: 6px; align-items: end; }
+.invoiceLine > * { min-width: 0; }
 .invoiceLine label { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; border: 1px solid #cbd7d1; border-radius: 6px; }
 .invoiceLine label input { width: 15px; min-height: 15px; }
 .invoiceTotal { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-radius: 6px; background: #eef3f0; }
 .dark .invoiceTotal { background: #26312c; }
 .placeholder { max-width: 760px; padding: 22px; display: grid; gap: 10px; }
 .placeholder h2 { margin: 0 0 6px; }
+.reportToolbar {
+  display: grid;
+  grid-template-columns: auto 180px;
+  gap: 12px;
+  align-items: end;
+  justify-content: start;
+}
+.reportPanel {
+  min-width: 0;
+  padding: 16px;
+}
+.barChart {
+  height: 260px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
+  gap: 10px;
+  align-items: end;
+  padding: 14px 4px 0;
+  border-top: 1px solid #e2e9e5;
+}
+.dark .barChart { border-color: #314039; }
+.barGroup {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 8px;
+  align-items: end;
+  text-align: center;
+}
+.barGroup strong {
+  font-size: 12px;
+  color: #607168;
+  font-weight: 750;
+}
+.dark .barGroup strong { color: #aebbb5; }
+.bars {
+  height: 210px;
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  gap: 5px;
+}
+.bars span {
+  width: min(18px, 42%);
+  min-height: 4px;
+  border-radius: 5px 5px 0 0;
+}
+.incomeBar { background: #1f6f58; }
+.expenseBar { background: #c84b31; }
+.reportTable {
+  display: grid;
+  gap: 6px;
+}
+.reportTableHeader, .reportTableRow {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) repeat(3, minmax(100px, 1fr));
+  gap: 10px;
+  align-items: center;
+}
+.reportTableHeader {
+  color: #607168;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.dark .reportTableHeader { color: #aebbb5; }
+.reportTableRow {
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid #e2e9e5;
+  border-radius: 6px;
+  background: #fbfcfb;
+}
+.dark .reportTableRow { background: #18201d; border-color: #314039; }
+.positiveAmount { color: #1f6f58; font-weight: 800; }
+.negativeAmount { color: #b83f28; font-weight: 800; }
 
 @media (max-width: 1100px) {
   body { min-width: 760px; }
   .app { grid-template-columns: 220px minmax(0, 1fr); }
   .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .splitWorkArea, .invoiceGrid, .twoColumn { grid-template-columns: 1fr; }
+  .reportToolbar { grid-template-columns: 1fr; }
 }
 
 .compactMetrics {
@@ -285,6 +363,7 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   gap: 10px;
   align-items: end;
 }
+.logoPicker label, .logoPicker input { min-width: 0; }
 .logoPreview {
   width: 74px;
   height: 58px;

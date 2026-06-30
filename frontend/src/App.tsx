@@ -23,7 +23,7 @@ import {
   Users,
   WalletCards
 } from "lucide-react";
-import { api, AppSettings, AuthSession, Customer, CustomerLookup, DashboardSummary, InvoiceInput, InvoiceItemInput, InvoiceListItem, Vendor } from "./api";
+import { api, AppSettings, AuthSession, Customer, CustomerLookup, DashboardSummary, IncomeExpensePeriod, IncomeExpenseReport, InvoiceInput, InvoiceItemInput, InvoiceListItem, Vendor } from "./api";
 
 type Page = "dashboard" | "customers" | "customerLookup" | "invoices" | "payments" | "purchases" | "vendors" | "import" | "tax" | "reports" | "backup" | "settings";
 
@@ -124,7 +124,7 @@ function App() {
         {page === "purchases" && <Placeholder title="Purchases" items={["Enter vendor, date, description, category, amount, tax paid, and receipt", "Connect purchases to invoices when useful", "CSV exports arrive in Phase 2"]} />}
         {page === "import" && <Placeholder title="Credit Card Import" items={["Upload CSV and preview rows before saving", "Map date, description, amount, and vendor columns", "Detect duplicates and suggest categories"]} />}
         {page === "tax" && <Placeholder title="Tax Reports" items={["Default tax rate stays editable in settings", "Report gross, taxable, non-taxable sales, tax collected, and purchases", "CSV/PDF export belongs in Phase 4"]} />}
-        {page === "reports" && <Placeholder title="Reports" items={["Sales, unpaid invoices, paid invoices, customer sales, purchases, tax, and profit estimate", "Date filters first, fancy charts later"]} />}
+        {page === "reports" && <IncomeExpenseReports />}
         {page === "backup" && <Placeholder title="Backup & Restore" items={["Use pg_dump and pg_restore for full PostgreSQL backups", "Export important tables to CSV", "Add daily, weekly, and monthly auto backup after core records are stable"]} />}
         {page === "settings" && <SettingsPage />}
       </main>
@@ -178,6 +178,8 @@ function Dashboard() {
 
   if (error) return <StateMessage message={error} />;
   if (!data) return <StateMessage message="Loading dashboard" />;
+  const recentInvoices = data.recentInvoices ?? [];
+  const recentCustomers = data.recentCustomers ?? [];
 
   return (
     <section className="contentStack">
@@ -189,8 +191,8 @@ function Dashboard() {
         <Metric label="Sales tax collected" value={money(data.salesTaxCollected)} />
       </div>
       <div className="twoColumn">
-        <ListPanel title="Recent invoices" rows={data.recentInvoices.map((invoice) => `${invoice.invoiceNumber} · ${invoice.customerName} · ${money(invoice.totalAmount)}`)} />
-        <ListPanel title="Recent customers" rows={data.recentCustomers.map((customer) => `${customer.fullName}${customer.companyName ? ` · ${customer.companyName}` : ""}`)} />
+        <ListPanel title="Recent invoices" rows={recentInvoices.map((invoice) => `${invoice.invoiceNumber} · ${invoice.customerName} · ${money(invoice.totalAmount)}`)} />
+        <ListPanel title="Recent customers" rows={recentCustomers.map((customer) => `${customer.fullName}${customer.companyName ? ` · ${customer.companyName}` : ""}`)} />
       </div>
     </section>
   );
@@ -405,10 +407,30 @@ function CustomerLookupPage() {
 function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [message, setMessage] = useState("");
+  const [logoPreviewSrc, setLogoPreviewSrc] = useState("");
 
   useEffect(() => {
     api.getSettings().then(setSettings).catch((err) => setMessage(String(err)));
   }, []);
+
+  useEffect(() => {
+    const path = settings?.businessLogoPath?.trim() ?? "";
+    if (!path) {
+      setLogoPreviewSrc("");
+      return;
+    }
+    let cancelled = false;
+    api.getImageDataURL(path)
+      .then((src) => {
+        if (!cancelled) setLogoPreviewSrc(src);
+      })
+      .catch(() => {
+        if (!cancelled) setLogoPreviewSrc("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [settings?.businessLogoPath]);
 
   if (!settings) return <StateMessage message={message || "Loading settings"} />;
   const currentSettings = settings;
@@ -433,7 +455,7 @@ function SettingsPage() {
         <TextArea label="Business address" value={currentSettings.businessAddress} onChange={(businessAddress) => setSettings({ ...currentSettings, businessAddress })} />
         <div className="fieldRow"><Input label="Business phone" value={currentSettings.businessPhone} onChange={(businessPhone) => setSettings({ ...currentSettings, businessPhone })} /><Input label="Business email" value={currentSettings.businessEmail} onChange={(businessEmail) => setSettings({ ...currentSettings, businessEmail })} /></div>
         <div className="logoPicker">
-          <div className="logoPreview">{currentSettings.businessLogoPath ? <img src={currentSettings.businessLogoPath} alt="Business logo" /> : <ImageIcon size={28} />}</div>
+          <div className="logoPreview">{logoPreviewSrc ? <img src={logoPreviewSrc} alt="Business logo" /> : <ImageIcon size={28} />}</div>
           <label>Business logo path<input value={currentSettings.businessLogoPath} onChange={(e) => setSettings({ ...currentSettings, businessLogoPath: e.target.value })} /></label>
           <button className="ghostButton" type="button" onClick={chooseLogo}>Choose</button>
         </div>
@@ -451,6 +473,75 @@ function SettingsPage() {
         <button className="primaryButton"><Settings size={16} /> Save settings</button>
       </section>
     </form>
+  );
+}
+
+function IncomeExpenseReports() {
+  const [period, setPeriod] = useState<IncomeExpensePeriod>("monthly");
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [report, setReport] = useState<IncomeExpenseReport | null>(null);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    setMessage("");
+    api.incomeExpenseReport(period, year)
+      .then(setReport)
+      .catch((err) => setMessage(err instanceof Error ? err.message : "Report failed"));
+  }, [period, year]);
+
+  if (message) return <StateMessage message={message} />;
+  if (!report) return <StateMessage message="Loading report" />;
+
+  return (
+    <section className="contentStack">
+      <div className="reportToolbar">
+        <div className="segmented">
+          <button type="button" className={period === "monthly" ? "active" : ""} onClick={() => setPeriod("monthly")}>Monthly</button>
+          <button type="button" className={period === "yearly" ? "active" : ""} onClick={() => setPeriod("yearly")}>Yearly</button>
+        </div>
+        <Input label={period === "monthly" ? "Report year" : "Ending year"} type="number" value={String(year)} onChange={(value) => setYear(Number(value) || new Date().getFullYear())} />
+      </div>
+      <div className="metricGrid compactMetrics">
+        <Metric label="Income" value={money(report.totalIncome)} />
+        <Metric label="Expense" value={money(report.totalExpense)} />
+        <Metric label="Net" value={money(report.netIncome)} />
+      </div>
+      <section className="reportPanel">
+        <div className="sectionTitle"><ReceiptText size={18} /><strong>{period === "monthly" ? `${year} month by month` : `${year - 4}-${year} yearly`} income and expense</strong></div>
+        <IncomeExpenseChart rows={report.rows} />
+      </section>
+      <section className="workList">
+        <div className="sectionTitle"><ReceiptText size={18} /><strong>Report detail</strong></div>
+        <div className="reportTable">
+          <div className="reportTableHeader"><span>Period</span><span>Income</span><span>Expense</span><span>Net</span></div>
+          {report.rows.map((row) => (
+            <div className="reportTableRow" key={row.label}>
+              <span>{row.label}</span>
+              <span>{money(row.income)}</span>
+              <span>{money(row.expense)}</span>
+              <span className={row.net >= 0 ? "positiveAmount" : "negativeAmount"}>{money(row.net)}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function IncomeExpenseChart({ rows }: { rows: IncomeExpenseReport["rows"] }) {
+  const maxValue = Math.max(1, ...rows.flatMap((row) => [row.income, row.expense]));
+  return (
+    <div className="barChart">
+      {rows.map((row) => (
+        <div className="barGroup" key={row.label}>
+          <div className="bars">
+            <span className="incomeBar" style={{ height: `${Math.max(4, (row.income / maxValue) * 100)}%` }} title={`Income ${money(row.income)}`} />
+            <span className="expenseBar" style={{ height: `${Math.max(4, (row.expense / maxValue) * 100)}%` }} title={`Expense ${money(row.expense)}`} />
+          </div>
+          <strong>{row.label}</strong>
+        </div>
+      ))}
+    </div>
   );
 }
 function InvoiceLine({ item, onChange, onDelete }: { item: InvoiceItemInput; onChange: (item: InvoiceItemInput) => void; onDelete: () => void }) {

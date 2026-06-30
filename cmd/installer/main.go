@@ -69,12 +69,20 @@ func installApp() error {
 
 func installRuntimeDependencies() {
 	if _, err := exec.LookPath("winget"); err != nil {
-		fmt.Println("winget was not found. Install WebView2 Runtime and PostgreSQL manually if they are missing.")
+		fmt.Println("winget was not found. Install these runtime dependencies manually:")
+		fmt.Println("  - Microsoft Edge WebView2 Runtime")
+		fmt.Println("  - PostgreSQL Server, including command-line tools such as psql.exe")
 		return
 	}
 
 	installWingetPackage("Microsoft.EdgeWebView2Runtime", "Microsoft Edge WebView2 Runtime")
-	installWingetPackage("PostgreSQL.PostgreSQL", "PostgreSQL")
+	installFirstAvailableWingetPackage("PostgreSQL", []string{
+		"PostgreSQL.PostgreSQL.17",
+		"PostgreSQL.PostgreSQL.18",
+		"PostgreSQL.PostgreSQL.16",
+		"PostgreSQL.PostgreSQL.15",
+	})
+	verifyPostgreSQLTools()
 }
 
 func installDeveloperTools() {
@@ -98,9 +106,100 @@ func installDeveloperTools() {
 func installWingetPackage(id string, label string) {
 	fmt.Printf("Checking/installing %s...\n", label)
 	args := []string{"install", "--id", id, "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements"}
-	if err := run("winget", args...); err != nil {
-		fmt.Printf("  Could not install %s automatically: %v\n", label, err)
+	output, err := runOutput("winget", args...)
+	if strings.TrimSpace(output) != "" {
+		fmt.Print(output)
+		if !strings.HasSuffix(output, "\n") {
+			fmt.Println()
+		}
 	}
+	if err == nil || isWingetAlreadyCurrent(output) {
+		return
+	}
+	fmt.Printf("  Could not install %s automatically: %v\n", label, err)
+}
+
+func installFirstAvailableWingetPackage(label string, ids []string) {
+	for _, id := range ids {
+		fmt.Printf("Checking/installing %s (%s)...\n", label, id)
+		args := []string{"install", "--id", id, "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements"}
+		output, err := runOutput("winget", args...)
+		if strings.TrimSpace(output) != "" {
+			fmt.Print(output)
+			if !strings.HasSuffix(output, "\n") {
+				fmt.Println()
+			}
+		}
+		if err == nil || isWingetAlreadyCurrent(output) {
+			return
+		}
+		if isWingetPackageNotFound(output) {
+			continue
+		}
+		fmt.Printf("  Could not install %s automatically with %s: %v\n", label, id, err)
+		return
+	}
+	fmt.Printf("  Could not find a supported winget package for %s.\n", label)
+}
+
+func isWingetAlreadyCurrent(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "found an existing package already installed") &&
+		(strings.Contains(lower, "no available upgrade found") || strings.Contains(lower, "no newer package versions are available"))
+}
+
+func isWingetPackageNotFound(output string) bool {
+	return strings.Contains(strings.ToLower(output), "no package found matching input criteria")
+}
+
+func verifyPostgreSQLTools() {
+	psqlPath := findPostgreSQLTool("psql.exe")
+	if psqlPath == "" {
+		fmt.Println()
+		fmt.Println("WARNING: PostgreSQL command-line tool psql.exe was not found.")
+		fmt.Println("The app needs PostgreSQL Server to run, and psql.exe is needed for database repair/reset commands.")
+		fmt.Println("Install PostgreSQL with command-line tools, then reopen PowerShell and run:")
+		fmt.Println("  where psql")
+		return
+	}
+
+	fmt.Printf("Found PostgreSQL command-line tool: %s\n", psqlPath)
+	binDir := filepath.Dir(psqlPath)
+	if _, err := exec.LookPath("psql.exe"); err == nil {
+		return
+	}
+
+	helperPath := filepath.Join(installDir(), "psql.cmd")
+	content := "@echo off\r\n\"" + psqlPath + "\" %*\r\n"
+	if err := os.WriteFile(helperPath, []byte(content), 0644); err != nil {
+		fmt.Printf("Could not create PostgreSQL helper command: %v\n", err)
+		return
+	}
+	fmt.Printf("Created PostgreSQL helper command: %s\n", helperPath)
+	fmt.Printf("PostgreSQL bin directory is not on PATH yet: %s\n", binDir)
+	fmt.Println("You can use the helper above for support commands, or add the bin directory to PATH.")
+}
+
+func findPostgreSQLTool(name string) string {
+	if path, err := exec.LookPath(name); err == nil {
+		return path
+	}
+
+	programFiles := []string{
+		os.Getenv("ProgramFiles"),
+		os.Getenv("ProgramFiles(x86)"),
+	}
+	for _, root := range programFiles {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		matches, err := filepath.Glob(filepath.Join(root, "PostgreSQL", "*", "bin", name))
+		if err != nil || len(matches) == 0 {
+			continue
+		}
+		return matches[len(matches)-1]
+	}
+	return ""
 }
 
 func createStartMenuLauncher(targetExe string) error {
@@ -139,6 +238,13 @@ func run(name string, args ...string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
+}
+
+func runOutput(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Stdin = os.Stdin
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }
 
 func hasArg(value string) bool {

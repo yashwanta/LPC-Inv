@@ -11,8 +11,11 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed migrations/*.sql
+var migrations embed.FS
+
 func main() {
-	app := NewApp()
+	app := NewApp(migrations)
 
 	err := wails.Run(&options.App{
 		Title:  "SimpleTech Books",

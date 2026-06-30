@@ -1,4 +1,4 @@
-﻿create table if not exists users (
+create table if not exists users (
 	id bigserial primary key,
 	username text not null unique,
 	display_name text not null,

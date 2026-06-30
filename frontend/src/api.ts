@@ -104,6 +104,24 @@ export type DashboardSummary = {
   recentCustomers: Customer[];
 };
 
+export type IncomeExpensePeriod = "monthly" | "yearly";
+
+export type IncomeExpenseReportItem = {
+  label: string;
+  income: number;
+  expense: number;
+  net: number;
+};
+
+export type IncomeExpenseReport = {
+  period: IncomeExpensePeriod;
+  year: number;
+  totalIncome: number;
+  totalExpense: number;
+  netIncome: number;
+  rows: IncomeExpenseReportItem[];
+};
+
 type WailsWindow = Window & {
   go?: {
     main?: {
@@ -225,6 +243,26 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
         recentInvoices: demoInvoices,
         recentCustomers: demoCustomers
       } as T;
+    case "GetIncomeExpenseReport": {
+      const period = String(args[0] || "monthly") as IncomeExpensePeriod;
+      const year = Number(args[1] || new Date().getFullYear());
+      const labels = period === "yearly"
+        ? Array.from({ length: 5 }, (_, index) => String(year - 4 + index))
+        : ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const rows = labels.map((label, index) => {
+        const income = period === "yearly" ? 7000 + index * 1400 : Math.max(0, 650 + index * 115 + (index % 3) * 420);
+        const expense = period === "yearly" ? 3200 + index * 650 : Math.max(0, 280 + index * 70 + (index % 2) * 190);
+        return { label, income, expense, net: income - expense };
+      });
+      return {
+        period,
+        year,
+        rows,
+        totalIncome: rows.reduce((sum, row) => sum + row.income, 0),
+        totalExpense: rows.reduce((sum, row) => sum + row.expense, 0),
+        netIncome: rows.reduce((sum, row) => sum + row.net, 0)
+      } as T;
+    }
     case "ListCustomers": {
       const search = String(args[0] || "");
       return demoCustomers.filter((row) => !search || filterText(`${row.fullName} ${row.companyName} ${row.email} ${row.phone}`, search)) as T;
@@ -283,6 +321,8 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
       return demoSettings as T;
     case "SelectBusinessLogo":
       return "C:\\Logos\\simpletech-logo.png" as T;
+    case "GetImageDataURL":
+      return "" as T;
     case "EmailInvoice":
       return undefined as T;
     default:
@@ -305,6 +345,7 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
 export const api = {
   login: (username: string, password: string) => call<AuthSession>("Login", username, password),
   dashboard: () => call<DashboardSummary>("GetDashboard"),
+  incomeExpenseReport: (period: IncomeExpensePeriod, year: number) => call<IncomeExpenseReport>("GetIncomeExpenseReport", period, year),
   listCustomers: (search = "") => call<Customer[]>("ListCustomers", search),
   listCustomerLookup: (search = "", kind = "all") => call<CustomerLookup[]>("ListCustomerLookup", search, kind),
   saveCustomer: (customer: Partial<Customer>) => call<Customer>("SaveCustomer", customer),
@@ -318,5 +359,6 @@ export const api = {
   getSettings: () => call<AppSettings>("GetSettings"),
   saveSettings: (settings: AppSettings) => call<AppSettings>("SaveSettings", settings),
   selectBusinessLogo: () => call<string>("SelectBusinessLogo"),
+  getImageDataURL: (path: string) => call<string>("GetImageDataURL", path),
   emailInvoice: (input: EmailInvoiceInput) => call<void>("EmailInvoice", input)
 };
