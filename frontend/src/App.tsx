@@ -12,6 +12,7 @@ import {
   LogOut,
   Moon,
   PackageOpen,
+  Pencil,
   Repeat,
   Plus,
   ReceiptText,
@@ -19,14 +20,15 @@ import {
   Settings,
   ShieldCheck,
   Sun,
+  Trash2,
   UserPlus,
   Users,
   WalletCards,
   Wrench
 } from "lucide-react";
-import { api, AppSettings, AuthSession, Customer, CustomerLookup, DashboardSummary, IncomeExpensePeriod, IncomeExpenseReport, InvoiceInput, InvoiceItemInput, InvoiceListItem, Purchase, PurchaseInput, Vendor, WalkInServiceInput } from "./api";
+import { api, AppSettings, AuthSession, Business, BusinessInput, Customer, CustomerLookup, DashboardSummary, IncomeExpensePeriod, IncomeExpenseReport, InvoiceDetail, InvoiceInput, InvoiceItemInput, InvoiceListItem, Purchase, PurchaseInput, TaxReportSummary, User, UserInput, Vendor, WalkInServiceInput } from "./api";
 
-type Page = "dashboard" | "manual" | "customers" | "customerLookup" | "invoices" | "payments" | "purchases" | "vendors" | "import" | "tax" | "reports" | "backup" | "settings";
+type Page = "dashboard" | "manual" | "customers" | "customerLookup" | "invoices" | "payments" | "purchases" | "vendors" | "import" | "tax" | "reports" | "users" | "backup" | "settings";
 
 const navItems: { id: Page; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
   { id: "dashboard", label: "Dashboard", icon: Home },
@@ -40,6 +42,7 @@ const navItems: { id: Page; label: string; icon: React.ComponentType<{ size?: nu
   { id: "import", label: "Credit Card Import", icon: CreditCard },
   { id: "tax", label: "Tax Reports", icon: BadgeDollarSign },
   { id: "reports", label: "Reports", icon: ReceiptText },
+  { id: "users", label: "User Management", icon: UserPlus },
   { id: "backup", label: "Backup & Restore", icon: DatabaseBackup },
   { id: "settings", label: "Settings", icon: Settings }
 ];
@@ -73,6 +76,19 @@ function today(offsetDays = 0) {
 
 function money(value: number | undefined) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value ?? 0);
+}
+
+function formatPhone(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 10);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function splitName(fullName: string) {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return { firstName: parts[0] || "", lastName: "" };
+  return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
 }
 
 function App() {
@@ -125,9 +141,10 @@ function App() {
         {page === "invoices" && <Invoices />}
         {page === "payments" && <Placeholder title="Payments" items={["Record payment date, amount, method, and notes", "Automatically update unpaid, partial, and paid status", "Keep the first payment workflow simple"]} />}
         {page === "purchases" && <Placeholder title="Purchases" items={["Enter vendor, date, description, category, amount, tax paid, and receipt", "Connect purchases to invoices when useful", "CSV exports arrive in Phase 2"]} />}
-        {page === "import" && <Placeholder title="Credit Card Import" items={["Upload CSV and preview rows before saving", "Map date, description, amount, and vendor columns", "Detect duplicates and suggest categories"]} />}
-        {page === "tax" && <Placeholder title="Tax Reports" items={["Default tax rate stays editable in settings", "Report gross, taxable, non-taxable sales, tax collected, and purchases", "CSV/PDF export belongs in Phase 4"]} />}
+        {page === "import" && <CreditCardImport />}
+        {page === "tax" && <TaxReports />}
         {page === "reports" && <IncomeExpenseReports />}
+        {page === "users" && <UserManagement />}
         {page === "backup" && <Placeholder title="Backup & Restore" items={["Use pg_dump and pg_restore for full PostgreSQL backups", "Export important tables to CSV", "Add daily, weekly, and monthly auto backup after core records are stable"]} />}
         {page === "settings" && <SettingsPage />}
       </main>
@@ -202,6 +219,7 @@ function Dashboard() {
 }
 
 const emptyServiceEntry: WalkInServiceInput = {
+  businessId: 0,
   serviceDate: today(),
   firstName: "",
   lastName: "",
@@ -223,6 +241,7 @@ const emptyServiceEntry: WalkInServiceInput = {
 };
 
 const emptyPurchaseEntry: PurchaseInput = {
+  businessId: 0,
   purchaseDate: today(),
   vendorName: "",
   description: "",
@@ -233,17 +252,57 @@ const emptyPurchaseEntry: PurchaseInput = {
   notes: ""
 };
 
+function noteValue(notes: string, label: string) {
+  const line = notes.split(/\r?\n/).find((row) => row.toLowerCase().startsWith(`${label.toLowerCase()}:`));
+  return line ? line.slice(label.length + 1).trim() : "";
+}
+
+function invoiceToServiceEntry(invoice: InvoiceDetail): WalkInServiceInput {
+  const labor = invoice.items.find((item) => item.itemType === "labor");
+  const parts = invoice.items.find((item) => item.itemType === "parts");
+  const name = splitName(invoice.customer.fullName);
+  return {
+    id: invoice.id,
+    businessId: invoice.businessId,
+    serviceDate: invoice.invoiceDate,
+    firstName: name.firstName,
+    lastName: name.lastName,
+    phone: formatPhone(invoice.customer.phone),
+    email: invoice.customer.email,
+    device: noteValue(invoice.notes, "Device"),
+    make: noteValue(invoice.notes, "Make"),
+    model: noteValue(invoice.notes, "Model"),
+    serialNumber: noteValue(invoice.notes, "Serial"),
+    issue: noteValue(invoice.notes, "Issue"),
+    solution: noteValue(invoice.notes, "Solution") || parts?.description || "",
+    partsCost: parts?.unitPrice ?? 0,
+    serviceCharge: labor?.unitPrice ?? 0,
+    amountPaid: invoice.paidAmount,
+    paymentMethod: invoice.paymentMethod || "cash",
+    paymentDate: invoice.paymentDate || invoice.invoiceDate,
+    reference: noteValue(invoice.notes, "Reference"),
+    notes: noteValue(invoice.notes, "Notes")
+  };
+}
+
 function ManualEntry() {
   const [service, setService] = useState<WalkInServiceInput>(emptyServiceEntry);
   const [purchase, setPurchase] = useState<PurchaseInput>(emptyPurchaseEntry);
   const [recentInvoices, setRecentInvoices] = useState<InvoiceListItem[]>([]);
   const [recentPurchases, setRecentPurchases] = useState<Purchase[]>([]);
+  const [businesses, setBusinesses] = useState<Business[]>([]);
   const [message, setMessage] = useState("");
 
   async function load() {
-    const [invoiceRows, purchaseRows] = await Promise.all([api.listInvoices(""), api.listPurchases("")]);
+    const [invoiceRows, purchaseRows, businessRows] = await Promise.all([api.listInvoices(""), api.listPurchases(""), api.listBusinesses()]);
     setRecentInvoices(invoiceRows.slice(0, 6));
     setRecentPurchases(purchaseRows.slice(0, 6));
+    setBusinesses(businessRows.filter((row) => row.active));
+    const defaultBusinessId = businessRows.find((row) => row.active)?.id || 0;
+    if (defaultBusinessId) {
+      setService((current) => current.businessId ? current : { ...current, businessId: defaultBusinessId });
+      setPurchase((current) => current.businessId ? current : { ...current, businessId: defaultBusinessId });
+    }
   }
 
   useEffect(() => { load().catch((err) => setMessage(String(err))); }, []);
@@ -253,26 +312,69 @@ function ManualEntry() {
   async function saveService(event: React.FormEvent) {
     event.preventDefault();
     await api.recordWalkInService(service);
-    setService({ ...emptyServiceEntry, serviceDate: today(), paymentDate: today() });
-    setMessage("Walk-in service income saved");
+    setService({ ...emptyServiceEntry, businessId: service.businessId, serviceDate: today(), paymentDate: today() });
+    setMessage(service.id ? "Walk-in service income updated" : "Walk-in service income saved");
     await load();
   }
 
   async function savePurchase(event: React.FormEvent) {
     event.preventDefault();
     await api.savePurchase(purchase);
-    setPurchase({ ...emptyPurchaseEntry, purchaseDate: today() });
-    setMessage("Expense saved");
+    setPurchase({ ...emptyPurchaseEntry, businessId: purchase.businessId, purchaseDate: today() });
+    setMessage(purchase.id ? "Expense updated" : "Expense saved");
+    await load();
+  }
+
+  async function editService(id: number) {
+    const invoice = await api.getInvoice(id);
+    setService(invoiceToServiceEntry(invoice));
+    setMessage("Editing service income");
+  }
+
+  function editPurchase(row: Purchase) {
+    setPurchase({
+      id: row.id,
+      businessId: row.businessId,
+      purchaseDate: row.purchaseDate,
+      vendorName: row.vendorName,
+      description: row.description,
+      categoryName: row.categoryName || "Uncategorized",
+      amount: row.amount,
+      taxPaid: row.taxPaid,
+      paymentMethod: row.paymentMethod || "card",
+      notes: row.notes
+    });
+    setMessage("Editing expense");
+  }
+
+  async function deleteService(id: number) {
+    if (!window.confirm("Delete this service income entry?")) return;
+    await api.deleteInvoice(id);
+    if (service.id === id) {
+      setService({ ...emptyServiceEntry, businessId: service.businessId, serviceDate: today(), paymentDate: today() });
+    }
+    setMessage("Service income deleted");
+    await load();
+  }
+
+  async function deletePurchase(id: number) {
+    if (!window.confirm("Delete this expense entry?")) return;
+    await api.deletePurchase(id);
+    if (purchase.id === id) {
+      setPurchase({ ...emptyPurchaseEntry, businessId: purchase.businessId, purchaseDate: today() });
+    }
+    setMessage("Expense deleted");
     await load();
   }
 
   return (
     <section className="manualEntryGrid">
       <form className="formPanel" onSubmit={saveService}>
-        <PanelTitle icon={Wrench} title="Walk-in service income" />
+        <PanelTitle icon={Wrench} title={service.id ? "Edit walk-in service income" : "Walk-in service income"} />
+        <BusinessSelect businesses={businesses} value={service.businessId} onChange={(businessId) => setService({ ...service, businessId })} />
         <div className="fieldRow"><Input label="Service date" type="date" value={service.serviceDate} onChange={(serviceDate) => setService({ ...service, serviceDate })} /><Input label="Payment date" type="date" value={service.paymentDate} onChange={(paymentDate) => setService({ ...service, paymentDate })} /></div>
         <div className="fieldRow"><Input label="First name" value={service.firstName} onChange={(firstName) => setService({ ...service, firstName })} /><Input label="Last name" value={service.lastName} onChange={(lastName) => setService({ ...service, lastName })} /></div>
-        <div className="fieldRow"><Input label="Phone" value={service.phone} onChange={(phone) => setService({ ...service, phone })} /><Input label="Email" value={service.email} onChange={(email) => setService({ ...service, email })} /></div>
+        <div className="fieldRow"><Input label="Phone" value={service.phone} onChange={(phone) => setService({ ...service, phone: formatPhone(phone) })} /><Input label="Email" value={service.email} onChange={(email) => setService({ ...service, email })} /></div>
         <div className="fieldRow"><Input label="Device" value={service.device} onChange={(device) => setService({ ...service, device })} /><Input label="Make" value={service.make} onChange={(make) => setService({ ...service, make })} /></div>
         <div className="fieldRow"><Input label="Model" value={service.model} onChange={(model) => setService({ ...service, model })} /><Input label="Serial number" value={service.serialNumber} onChange={(serialNumber) => setService({ ...service, serialNumber })} /></div>
         <TextArea label="Issue" value={service.issue} onChange={(issue) => setService({ ...service, issue })} />
@@ -282,25 +384,294 @@ function ManualEntry() {
         <Input label="Reference" value={service.reference} onChange={(reference) => setService({ ...service, reference })} />
         <TextArea label="Notes" value={service.notes} onChange={(notes) => setService({ ...service, notes })} />
         <div className="invoiceTotal"><span>Total income</span><strong>{money(serviceTotal)}</strong></div>
-        <button className="primaryButton"><Plus size={16} /> Save service income</button>
+        <div className="formActions">
+          <button className="primaryButton"><Plus size={16} /> {service.id ? "Update service income" : "Save service income"}</button>
+          {service.id ? <button className="ghostButton" type="button" onClick={() => setService({ ...emptyServiceEntry, businessId: service.businessId, serviceDate: today(), paymentDate: today() })}>New entry</button> : null}
+        </div>
       </form>
 
       <div className="contentStack">
         <form className="formPanel" onSubmit={savePurchase}>
-          <PanelTitle icon={PackageOpen} title="Manual expense" />
+          <PanelTitle icon={PackageOpen} title={purchase.id ? "Edit manual expense" : "Manual expense"} />
+          <BusinessSelect businesses={businesses} value={purchase.businessId} onChange={(businessId) => setPurchase({ ...purchase, businessId })} />
           <Input label="Purchase date" type="date" value={purchase.purchaseDate} onChange={(purchaseDate) => setPurchase({ ...purchase, purchaseDate })} />
           <Input label="Vendor" value={purchase.vendorName} onChange={(vendorName) => setPurchase({ ...purchase, vendorName })} />
           <TextArea label="Description" value={purchase.description} onChange={(description) => setPurchase({ ...purchase, description })} />
           <div className="fieldRow"><CategorySelect value={purchase.categoryName} onChange={(categoryName) => setPurchase({ ...purchase, categoryName })} /><PaymentMethodSelect value={purchase.paymentMethod} onChange={(paymentMethod) => setPurchase({ ...purchase, paymentMethod })} /></div>
           <div className="fieldRow"><Input label="Amount" type="number" value={String(purchase.amount)} onChange={(amount) => setPurchase({ ...purchase, amount: Number(amount) })} /><Input label="Tax paid" type="number" value={String(purchase.taxPaid)} onChange={(taxPaid) => setPurchase({ ...purchase, taxPaid: Number(taxPaid) })} /></div>
           <TextArea label="Notes" value={purchase.notes} onChange={(notes) => setPurchase({ ...purchase, notes })} />
-          <button className="primaryButton"><Plus size={16} /> Save expense</button>
+          <div className="formActions">
+            <button className="primaryButton"><Plus size={16} /> {purchase.id ? "Update expense" : "Save expense"}</button>
+            {purchase.id ? <button className="ghostButton" type="button" onClick={() => setPurchase({ ...emptyPurchaseEntry, businessId: purchase.businessId, purchaseDate: today() })}>New expense</button> : null}
+          </div>
         </form>
         {message && <div className="notice">{message}</div>}
         <div className="twoColumn manualRecent">
-          <ListPanel title="Recent service income" rows={recentInvoices.map((invoice) => `${invoice.invoiceDate} · ${invoice.customerName} · ${money(invoice.totalAmount)} · ${invoice.status}`)} />
-          <ListPanel title="Recent expenses" rows={recentPurchases.map((row) => `${row.purchaseDate} · ${row.vendorName || "No vendor"} · ${money(row.amount)} · ${row.categoryName}`)} />
+          <div className="listPanel">
+            <div className="sectionTitle"><strong>Recent service income</strong></div>
+            <div className="tableList">
+              {recentInvoices.length ? recentInvoices.map((invoice) => (
+                <div className="invoiceRow" key={invoice.id}>
+                  <span><strong>{invoice.invoiceDate} · {invoice.customerName}</strong><small>{invoice.businessName || "Business"} · {invoice.status}</small></span>
+                  <span>{money(invoice.totalAmount)}</span>
+                  <div className="rowActions">
+                    <button className="iconButton" type="button" onClick={() => editService(invoice.id)} title="Edit service income"><Pencil size={16} /></button>
+                    <button className="iconButton dangerIconButton" type="button" onClick={() => deleteService(invoice.id)} title="Delete service income"><Trash2 size={16} /></button>
+                  </div>
+                </div>
+              )) : <StateMessage message="No records yet" />}
+            </div>
+          </div>
+          <div className="listPanel">
+            <div className="sectionTitle"><strong>Recent expenses</strong></div>
+            <div className="tableList">
+              {recentPurchases.length ? recentPurchases.map((row) => (
+                <div className="invoiceRow" key={row.id}>
+                  <span><strong>{row.purchaseDate} · {row.vendorName || "No vendor"}</strong><small>{row.businessName || "Business"} · {row.categoryName}</small></span>
+                  <span>{money(row.amount)}</span>
+                  <div className="rowActions">
+                    <button className="iconButton" type="button" onClick={() => editPurchase(row)} title="Edit expense"><Pencil size={16} /></button>
+                    <button className="iconButton dangerIconButton" type="button" onClick={() => deletePurchase(row.id)} title="Delete expense"><Trash2 size={16} /></button>
+                  </div>
+                </div>
+              )) : <StateMessage message="No records yet" />}
+            </div>
+          </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function parseCSV(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      cell += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      row.push(cell.trim());
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(cell.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  row.push(cell.trim());
+  if (row.some(Boolean)) rows.push(row);
+  return rows;
+}
+
+function CreditCardImport() {
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [businessId, setBusinessId] = useState(0);
+  const [rows, setRows] = useState<PurchaseInput[]>([]);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    api.listBusinesses().then((items) => {
+      const active = items.filter((row) => row.active);
+      setBusinesses(active);
+      setBusinessId(active[0]?.id || 0);
+    }).catch((err) => setMessage(String(err)));
+  }, []);
+
+  async function chooseFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const matrix = parseCSV(await file.text());
+    const [headers = [], ...dataRows] = matrix;
+    const indexFor = (...names: string[]) => headers.findIndex((header) => names.includes(header.trim().toLowerCase()));
+    const dateIndex = indexFor("transaction_date", "date", "purchase_date");
+    const descriptionIndex = indexFor("description", "memo", "details", "name");
+    const amountIndex = indexFor("amount", "debit", "charge");
+    const vendorIndex = indexFor("vendor_name", "vendor", "merchant");
+    const categoryIndex = indexFor("category_name", "category");
+    const taxIndex = indexFor("tax_paid", "tax");
+    const paymentIndex = indexFor("payment_method", "method");
+    const parsed = dataRows.map((row) => ({
+      businessId,
+      purchaseDate: row[dateIndex] || today(),
+      vendorName: row[vendorIndex] || "",
+      description: row[descriptionIndex] || row[vendorIndex] || "Credit card transaction",
+      categoryName: row[categoryIndex] || "Uncategorized",
+      amount: Math.abs(Number(String(row[amountIndex] || "0").replace(/[$,]/g, ""))),
+      taxPaid: Math.max(0, Number(String(row[taxIndex] || "0").replace(/[$,]/g, ""))),
+      paymentMethod: row[paymentIndex] || "card",
+      notes: `Imported from ${file.name}`
+    })).filter((row) => row.amount > 0);
+    setRows(parsed);
+    setMessage(`${parsed.length} rows ready to import`);
+  }
+
+  async function saveRows() {
+    for (const row of rows) {
+      await api.savePurchase({ ...row, businessId });
+    }
+    setRows([]);
+    setMessage("Credit card rows imported into purchases");
+  }
+
+  return (
+    <section className="contentStack">
+      <div className="formPanel importPanel">
+        <PanelTitle icon={CreditCard} title="Credit card import" />
+        <BusinessSelect businesses={businesses} value={businessId} onChange={setBusinessId} />
+        <label>CSV file<input type="file" accept=".csv,text/csv" onChange={chooseFile} /></label>
+        {message && <div className="notice">{message}</div>}
+        <button className="primaryButton" type="button" disabled={!rows.length} onClick={saveRows}><Plus size={16} /> Import purchases</button>
+      </div>
+      <section className="workList">
+        <div className="sectionTitle"><CreditCard size={18} /><strong>Preview</strong></div>
+        <div className="reportTable">
+          <div className="importTableHeader"><span>Date</span><span>Vendor</span><span>Description</span><span>Category</span><span>Amount</span></div>
+          {rows.map((row, index) => (
+            <div className="importTableRow" key={`${row.purchaseDate}-${index}`}>
+              <span>{row.purchaseDate}</span><span>{row.vendorName || "-"}</span><span>{row.description}</span><span>{row.categoryName}</span><span>{money(row.amount)}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function TaxReports() {
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [businessId, setBusinessId] = useState(0);
+  const [startDate, setStartDate] = useState(`${new Date().getFullYear()}-01-01`);
+  const [endDate, setEndDate] = useState(today());
+  const [report, setReport] = useState<TaxReportSummary | null>(null);
+  const [message, setMessage] = useState("");
+
+  async function load(nextBusinessId = businessId) {
+    setReport(await api.taxReport(startDate, endDate, nextBusinessId));
+  }
+
+  useEffect(() => {
+    api.listBusinesses().then((items) => {
+      const active = items.filter((row) => row.active);
+      setBusinesses(active);
+      load(0).catch((err) => setMessage(String(err)));
+    }).catch((err) => setMessage(String(err)));
+  }, []);
+
+  async function refresh(event: React.FormEvent) {
+    event.preventDefault();
+    await load();
+  }
+
+  function exportCSV() {
+    if (!report) return;
+    const csv = [
+      ["Start Date", "End Date", "Business", "Gross Sales", "Taxable Sales", "Non-Taxable Sales", "Sales Tax Collected", "Total Purchases", "Net Income"],
+      [report.startDate, report.endDate, report.businessName || "All businesses", report.grossSales, report.taxableSales, report.nonTaxableSales, report.salesTaxCollected, report.totalPurchases, report.netIncome]
+    ].map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `tax-report-${report.startDate}-to-${report.endDate}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <section className="contentStack">
+      <form className="reportToolbar" onSubmit={refresh}>
+        <BusinessSelect businesses={[{ id: 0, name: "All businesses", active: true }, ...businesses]} value={businessId} onChange={setBusinessId} />
+        <Input label="Start date" type="date" value={startDate} onChange={setStartDate} />
+        <Input label="End date" type="date" value={endDate} onChange={setEndDate} />
+        <button className="primaryButton"><ReceiptText size={16} /> Run</button>
+        <button className="ghostButton" type="button" disabled={!report} onClick={exportCSV}><FileDown size={16} /> Export CSV</button>
+      </form>
+      {message && <div className="notice">{message}</div>}
+      {report && (
+        <>
+          <div className="metricGrid compactMetrics">
+            <Metric label="Gross sales" value={money(report.grossSales)} />
+            <Metric label="Sales tax" value={money(report.salesTaxCollected)} />
+            <Metric label="Purchases" value={money(report.totalPurchases)} />
+          </div>
+          <section className="workList">
+            <div className="reportTable">
+              <div className="reportTableHeader"><span>Taxable</span><span>Non-taxable</span><span>Net income</span><span>Business</span></div>
+              <div className="reportTableRow"><span>{money(report.taxableSales)}</span><span>{money(report.nonTaxableSales)}</span><span>{money(report.netIncome)}</span><span>{report.businessName || "All businesses"}</span></div>
+            </div>
+          </section>
+        </>
+      )}
+    </section>
+  );
+}
+
+const emptyUser: UserInput = { username: "", displayName: "", password: "", role: "standard", accessLabel: "Sales Entry", active: true };
+const emptyBusiness: BusinessInput = { name: "", active: true };
+
+function UserManagement() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [userForm, setUserForm] = useState<UserInput>(emptyUser);
+  const [businessForm, setBusinessForm] = useState<BusinessInput>(emptyBusiness);
+  const [message, setMessage] = useState("");
+
+  async function load() {
+    const [userRows, businessRows] = await Promise.all([api.listUsers(), api.listBusinesses()]);
+    setUsers(userRows);
+    setBusinesses(businessRows);
+  }
+
+  useEffect(() => { load().catch((err) => setMessage(String(err))); }, []);
+
+  async function saveUser(event: React.FormEvent) {
+    event.preventDefault();
+    await api.saveUser(userForm);
+    setUserForm(emptyUser);
+    setMessage("User saved");
+    await load();
+  }
+
+  async function saveBusiness(event: React.FormEvent) {
+    event.preventDefault();
+    await api.saveBusiness(businessForm);
+    setBusinessForm(emptyBusiness);
+    setMessage("Business saved");
+    await load();
+  }
+
+  return (
+    <section className="splitWorkArea">
+      <div className="contentStack">
+        <form className="formPanel" onSubmit={saveUser}>
+          <PanelTitle icon={UserPlus} title={userForm.id ? "Edit user" : "Create user"} />
+          <div className="fieldRow"><Input label="Username" value={userForm.username} onChange={(username) => setUserForm({ ...userForm, username })} required /><Input label="Display name" value={userForm.displayName} onChange={(displayName) => setUserForm({ ...userForm, displayName })} /></div>
+          <div className="fieldRow"><Input label={userForm.id ? "New password" : "Password"} type="password" value={userForm.password} onChange={(password) => setUserForm({ ...userForm, password })} required={!userForm.id} /><label>Role<select value={userForm.role} onChange={(e) => setUserForm({ ...userForm, role: e.target.value as UserInput["role"] })}><option value="standard">Standard</option><option value="admin">Admin</option></select></label></div>
+          <Input label="Access label" value={userForm.accessLabel} onChange={(accessLabel) => setUserForm({ ...userForm, accessLabel })} />
+          <label className="checkRow"><input type="checkbox" checked={userForm.active} onChange={(e) => setUserForm({ ...userForm, active: e.target.checked })} /> Active</label>
+          <button className="primaryButton"><Plus size={16} /> Save user</button>
+        </form>
+        <form className="formPanel" onSubmit={saveBusiness}>
+          <PanelTitle icon={Building2} title={businessForm.id ? "Edit business" : "Add business"} />
+          <Input label="Business name" value={businessForm.name} onChange={(name) => setBusinessForm({ ...businessForm, name })} required />
+          <label className="checkRow"><input type="checkbox" checked={businessForm.active} onChange={(e) => setBusinessForm({ ...businessForm, active: e.target.checked })} /> Active</label>
+          <button className="primaryButton"><Plus size={16} /> Save business</button>
+        </form>
+        {message && <div className="notice">{message}</div>}
+      </div>
+      <div className="contentStack">
+        <section className="workList"><div className="sectionTitle"><strong>Users</strong></div><div className="tableList">{users.map((row) => <button className="rowButton" key={row.id} onClick={() => setUserForm({ ...row, password: "" })}><span><strong>{row.displayName}</strong><small>{row.username} · {row.accessLabel}</small></span><span className={row.active ? "pill success" : "pill"}>{row.role}</span></button>)}</div></section>
+        <section className="workList"><div className="sectionTitle"><strong>Businesses</strong></div><div className="tableList">{businesses.map((row) => <button className="rowButton" key={row.id} onClick={() => setBusinessForm(row)}><span><strong>{row.name}</strong></span><span className={row.active ? "pill success" : "pill"}>{row.active ? "Active" : "Inactive"}</span></button>)}</div></section>
       </div>
     </section>
   );
@@ -348,7 +719,7 @@ function Customers() {
         <PanelTitle icon={Users} title={form.id ? "Edit customer" : "Add customer"} />
         <Input label="Full name" value={form.fullName} onChange={(fullName) => setForm({ ...form, fullName })} required />
         <Input label="Company" value={form.companyName} onChange={(companyName) => setForm({ ...form, companyName })} />
-        <div className="fieldRow"><Input label="Email" value={form.email} onChange={(email) => setForm({ ...form, email })} /><Input label="Phone" value={form.phone} onChange={(phone) => setForm({ ...form, phone })} /></div>
+        <div className="fieldRow"><Input label="Email" value={form.email} onChange={(email) => setForm({ ...form, email })} /><Input label="Phone" value={form.phone} onChange={(phone) => setForm({ ...form, phone: formatPhone(phone) })} /></div>
         <TextArea label="Billing address" value={form.billingAddress} onChange={(billingAddress) => setForm({ ...form, billingAddress })} />
         <TextArea label="Service address" value={form.serviceAddress} onChange={(serviceAddress) => setForm({ ...form, serviceAddress })} />
         <label className="checkRow"><input type="checkbox" checked={Boolean(form.taxExempt)} onChange={(e) => setForm({ ...form, taxExempt: e.target.checked })} /> Tax exempt</label>
@@ -387,7 +758,7 @@ function Vendors() {
         <PanelTitle icon={Building2} title={form.id ? "Edit vendor" : "Add vendor"} />
         <Input label="Vendor name" value={form.vendorName} onChange={(vendorName) => setForm({ ...form, vendorName })} required />
         <Input label="Contact" value={form.contactName} onChange={(contactName) => setForm({ ...form, contactName })} />
-        <div className="fieldRow"><Input label="Email" value={form.email} onChange={(email) => setForm({ ...form, email })} /><Input label="Phone" value={form.phone} onChange={(phone) => setForm({ ...form, phone })} /></div>
+        <div className="fieldRow"><Input label="Email" value={form.email} onChange={(email) => setForm({ ...form, email })} /><Input label="Phone" value={form.phone} onChange={(phone) => setForm({ ...form, phone: formatPhone(phone) })} /></div>
         <Input label="Website" value={form.website} onChange={(website) => setForm({ ...form, website })} />
         <TextArea label="Address" value={form.address} onChange={(address) => setForm({ ...form, address })} />
         <TextArea label="Notes" value={form.notes} onChange={(notes) => setForm({ ...form, notes })} />
@@ -400,15 +771,21 @@ function Vendors() {
 
 function Invoices() {
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [businesses, setBusinesses] = useState<Business[]>([]);
   const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
   const [items, setItems] = useState<InvoiceItemInput[]>([{ itemType: "labor", description: "Computer repair labor", quantity: 1, unitPrice: 0, taxable: false }]);
-  const [invoice, setInvoice] = useState<Omit<InvoiceInput, "items">>({ customerId: 0, invoiceDate: today(), dueDate: today(14), discountAmount: 0, notes: "", terms: "" });
+  const [invoice, setInvoice] = useState<Omit<InvoiceInput, "items">>({ businessId: 0, customerId: 0, invoiceDate: today(), dueDate: today(14), discountAmount: 0, notes: "", terms: "" });
   const [message, setMessage] = useState("");
 
   async function load() {
-    const [customerRows, invoiceRows] = await Promise.all([api.listCustomers(""), api.listInvoices("")]);
+    const [customerRows, invoiceRows, businessRows] = await Promise.all([api.listCustomers(""), api.listInvoices(""), api.listBusinesses()]);
     setCustomers(customerRows);
     setInvoices(invoiceRows);
+    setBusinesses(businessRows.filter((row) => row.active));
+    const defaultBusinessId = businessRows.find((row) => row.active)?.id || 0;
+    if (defaultBusinessId) {
+      setInvoice((current) => current.businessId ? current : { ...current, businessId: defaultBusinessId });
+    }
   }
   useEffect(() => { load().catch((err) => setMessage(String(err))); }, []);
 
@@ -435,6 +812,7 @@ function Invoices() {
     <section className="invoiceGrid">
       <form className="formPanel" onSubmit={create}>
         <PanelTitle icon={FileText} title="Create invoice" />
+        <BusinessSelect businesses={businesses} value={invoice.businessId} onChange={(businessId) => setInvoice({ ...invoice, businessId })} />
         <label>Customer<select value={invoice.customerId} onChange={(e) => setInvoice({ ...invoice, customerId: Number(e.target.value) })} required><option value={0}>Select customer</option>{customers.map((customer) => <option value={customer.id} key={customer.id}>{customer.fullName}</option>)}</select></label>
         <div className="fieldRow"><Input label="Invoice date" type="date" value={invoice.invoiceDate} onChange={(invoiceDate) => setInvoice({ ...invoice, invoiceDate })} /><Input label="Due date" type="date" value={invoice.dueDate} onChange={(dueDate) => setInvoice({ ...invoice, dueDate })} /></div>
         <div className="lineEditor">
@@ -449,7 +827,7 @@ function Invoices() {
       </form>
       <div className="workList">
         <div className="sectionTitle"><FileText size={18} /><strong>Recent invoices</strong></div>
-        <div className="tableList">{invoices.map((row) => <div className="invoiceRow" key={row.id}><span><strong>{row.invoiceNumber}</strong><small>{row.customerName} · {row.invoiceDate}</small></span><span>{money(row.totalAmount)}</span><div className="rowActions"><button className="iconButton" onClick={() => emailInvoice(row.id)} title="Email invoice"><Mail size={16} /></button><button className="iconButton" onClick={() => exportPDF(row.id)} title="Export PDF"><FileDown size={16} /></button></div></div>)}</div>
+        <div className="tableList">{invoices.map((row) => <div className="invoiceRow" key={row.id}><span><strong>{row.invoiceNumber}</strong><small>{row.customerName} · {row.businessName || "Business"} · {row.invoiceDate}</small></span><span>{money(row.totalAmount)}</span><div className="rowActions"><button className="iconButton" onClick={() => emailInvoice(row.id)} title="Email invoice"><Mail size={16} /></button><button className="iconButton" onClick={() => exportPDF(row.id)} title="Export PDF"><FileDown size={16} /></button></div></div>)}</div>
       </div>
     </section>
   );
@@ -561,7 +939,7 @@ function SettingsPage() {
         <PanelTitle icon={ImageIcon} title="Business" />
         <Input label="Business name" value={currentSettings.businessName} onChange={(businessName) => setSettings({ ...currentSettings, businessName })} />
         <TextArea label="Business address" value={currentSettings.businessAddress} onChange={(businessAddress) => setSettings({ ...currentSettings, businessAddress })} />
-        <div className="fieldRow"><Input label="Business phone" value={currentSettings.businessPhone} onChange={(businessPhone) => setSettings({ ...currentSettings, businessPhone })} /><Input label="Business email" value={currentSettings.businessEmail} onChange={(businessEmail) => setSettings({ ...currentSettings, businessEmail })} /></div>
+        <div className="fieldRow"><Input label="Business phone" value={currentSettings.businessPhone} onChange={(businessPhone) => setSettings({ ...currentSettings, businessPhone: formatPhone(businessPhone) })} /><Input label="Business email" value={currentSettings.businessEmail} onChange={(businessEmail) => setSettings({ ...currentSettings, businessEmail })} /></div>
         <div className="logoPicker">
           <div className="logoPreview">{logoPreviewSrc ? <img src={logoPreviewSrc} alt="Business logo" /> : <ImageIcon size={28} />}</div>
           <label>Business logo path<input value={currentSettings.businessLogoPath} onChange={(e) => setSettings({ ...currentSettings, businessLogoPath: e.target.value })} /></label>
@@ -664,8 +1042,23 @@ function Placeholder({ title, items }: { title: string; items: string[] }) { ret
 function SearchBox({ value, onChange, onSearch }: { value: string; onChange: (value: string) => void; onSearch: () => void }) { return <div className="searchBox"><Search size={16} /><input value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onSearch(); }} placeholder="Search" /><button className="ghostButton" onClick={onSearch}>Search</button></div>; }
 function Input({ label, value, onChange, type = "text", required = false }: { label: string; value?: string; onChange: (value: string) => void; type?: string; required?: boolean }) { return <label>{label}<input type={type} value={value ?? ""} onChange={(e) => onChange(e.target.value)} required={required} /></label>; }
 function TextArea({ label, value, onChange }: { label: string; value?: string; onChange: (value: string) => void }) { return <label>{label}<textarea value={value ?? ""} onChange={(e) => onChange(e.target.value)} /></label>; }
+function BusinessSelect({ businesses, value, onChange }: { businesses: Business[]; value: number; onChange: (value: number) => void }) {
+  return <label>Business<select value={value} onChange={(e) => onChange(Number(e.target.value))}>{businesses.map((business) => <option value={business.id} key={business.id}>{business.name}</option>)}</select></label>;
+}
 function PaymentMethodSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return <label>Payment method<select value={value} onChange={(e) => onChange(e.target.value)}><option value="cash">Cash</option><option value="card">Card</option><option value="check">Check</option><option value="zelle">Zelle</option><option value="other">Other</option></select></label>;
+  const methods = ["Cash", "Card", "CashApp", "Venmo", "Zelle", "Check", "ApplePay", "GooglePay", "PayPal"];
+  const aliases: Record<string, string> = { cash: "Cash", card: "Card", check: "Check", zelle: "Zelle", other: "custom" };
+  const normalizedValue = aliases[value] || value || "Cash";
+  const customMode = normalizedValue === "custom" || !methods.includes(normalizedValue);
+  return (
+    <label>Payment method
+      <select value={customMode ? "custom" : normalizedValue} onChange={(e) => onChange(e.target.value)}>
+        {methods.map((method) => <option value={method} key={method}>{method}</option>)}
+        <option value="custom">Add new...</option>
+      </select>
+      {customMode ? <input className="inlineField" value={normalizedValue === "custom" ? "" : normalizedValue} onChange={(e) => onChange(e.target.value)} placeholder="New payment method" /> : null}
+    </label>
+  );
 }
 function CategorySelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return <label>Category<select value={value} onChange={(e) => onChange(e.target.value)}><option>Computer parts</option><option>Tools</option><option>Software</option><option>Shipping</option><option>Office supplies</option><option>Repair supplies</option><option>Advertising</option><option>Bank fees</option><option>Fuel / travel</option><option>Uncategorized</option></select></label>;

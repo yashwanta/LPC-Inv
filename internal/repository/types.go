@@ -6,7 +6,18 @@ type User struct {
 	DisplayName  string `json:"displayName"`
 	PasswordHash string `json:"-"`
 	Role         string `json:"role"`
+	AccessLabel  string `json:"accessLabel"`
 	Active       bool   `json:"active"`
+}
+
+type UserInput struct {
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+	Password    string `json:"password"`
+	Role        string `json:"role"`
+	AccessLabel string `json:"accessLabel"`
+	Active      bool   `json:"active"`
 }
 
 type AuthSession struct {
@@ -69,6 +80,8 @@ type VendorInput struct {
 
 type Purchase struct {
 	ID            int64   `json:"id"`
+	BusinessID    int64   `json:"businessId"`
+	BusinessName  string  `json:"businessName"`
 	VendorID      int64   `json:"vendorId"`
 	VendorName    string  `json:"vendorName"`
 	PurchaseDate  string  `json:"purchaseDate"`
@@ -82,6 +95,8 @@ type Purchase struct {
 }
 
 type PurchaseInput struct {
+	ID            int64   `json:"id"`
+	BusinessID    int64   `json:"businessId"`
 	PurchaseDate  string  `json:"purchaseDate"`
 	VendorName    string  `json:"vendorName"`
 	Description   string  `json:"description"`
@@ -101,6 +116,7 @@ type InvoiceItemInput struct {
 }
 
 type InvoiceInput struct {
+	BusinessID     int64              `json:"businessId"`
 	CustomerID     int64              `json:"customerId"`
 	InvoiceDate    string             `json:"invoiceDate"`
 	DueDate        string             `json:"dueDate"`
@@ -111,6 +127,8 @@ type InvoiceInput struct {
 }
 
 type WalkInServiceInput struct {
+	ID            int64   `json:"id"`
+	BusinessID    int64   `json:"businessId"`
 	ServiceDate   string  `json:"serviceDate"`
 	FirstName     string  `json:"firstName"`
 	LastName      string  `json:"lastName"`
@@ -145,6 +163,8 @@ type InvoiceItem struct {
 
 type InvoiceDetail struct {
 	ID             int64         `json:"id"`
+	BusinessID     int64         `json:"businessId"`
+	BusinessName   string        `json:"businessName"`
 	InvoiceNumber  string        `json:"invoiceNumber"`
 	InvoiceDate    string        `json:"invoiceDate"`
 	DueDate        string        `json:"dueDate"`
@@ -155,6 +175,8 @@ type InvoiceDetail struct {
 	TaxAmount      float64       `json:"taxAmount"`
 	TotalAmount    float64       `json:"totalAmount"`
 	PaidAmount     float64       `json:"paidAmount"`
+	PaymentDate    string        `json:"paymentDate"`
+	PaymentMethod  string        `json:"paymentMethod"`
 	Notes          string        `json:"notes"`
 	Terms          string        `json:"terms"`
 	Items          []InvoiceItem `json:"items"`
@@ -164,6 +186,8 @@ type InvoiceDetail struct {
 
 type InvoiceListItem struct {
 	ID            int64   `json:"id"`
+	BusinessID    int64   `json:"businessId"`
+	BusinessName  string  `json:"businessName"`
 	InvoiceNumber string  `json:"invoiceNumber"`
 	InvoiceDate   string  `json:"invoiceDate"`
 	DueDate       string  `json:"dueDate"`
@@ -219,6 +243,31 @@ type IncomeExpenseReportItem struct {
 	Income  float64 `json:"income"`
 	Expense float64 `json:"expense"`
 	Net     float64 `json:"net"`
+}
+
+type Business struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Active bool   `json:"active"`
+}
+
+type BusinessInput struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Active bool   `json:"active"`
+}
+
+type TaxReportSummary struct {
+	StartDate         string  `json:"startDate"`
+	EndDate           string  `json:"endDate"`
+	BusinessID        int64   `json:"businessId"`
+	BusinessName      string  `json:"businessName"`
+	GrossSales        float64 `json:"grossSales"`
+	TaxableSales      float64 `json:"taxableSales"`
+	NonTaxableSales   float64 `json:"nonTaxableSales"`
+	SalesTaxCollected float64 `json:"salesTaxCollected"`
+	TotalPurchases    float64 `json:"totalPurchases"`
+	NetIncome         float64 `json:"netIncome"`
 }
 
 type CustomerLookup struct {

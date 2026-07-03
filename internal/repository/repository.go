@@ -39,14 +39,130 @@ func (r *Repository) EnsureDefaultAdmin(ctx context.Context) error {
 func (r *Repository) GetUserByUsername(ctx context.Context, username string) (*User, error) {
 	var user User
 	err := r.db.QueryRowContext(ctx, `
-		select id, username, display_name, password_hash, role, active
+		select id, username, display_name, password_hash, role, access_label, active
 		from users
 		where lower(username) = lower($1) and active = true
-	`, strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.Active)
+	`, strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active)
 	if err != nil {
 		return nil, err
 	}
 	return &user, nil
+}
+
+func (r *Repository) ListUsers(ctx context.Context) ([]User, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		select id, username, display_name, '' as password_hash, role, access_label, active
+		from users
+		order by active desc, display_name asc
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	users := []User{}
+	for rows.Next() {
+		var user User
+		if err := rows.Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active); err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func (r *Repository) SaveUser(ctx context.Context, input UserInput) (*User, error) {
+	input.Username = strings.TrimSpace(input.Username)
+	input.DisplayName = strings.TrimSpace(input.DisplayName)
+	if input.Username == "" {
+		return nil, fmt.Errorf("username is required")
+	}
+	if input.DisplayName == "" {
+		input.DisplayName = input.Username
+	}
+	role := strings.ToLower(strings.TrimSpace(input.Role))
+	if role != "standard" {
+		role = "admin"
+	}
+	accessLabel := fallback(input.AccessLabel, "Full Access")
+	if input.ID == 0 {
+		if strings.TrimSpace(input.Password) == "" {
+			return nil, fmt.Errorf("password is required")
+		}
+		hash, err := security.HashPassword(input.Password)
+		if err != nil {
+			return nil, err
+		}
+		var user User
+		err = r.db.QueryRowContext(ctx, `
+			insert into users(username, display_name, password_hash, role, access_label, active)
+			values($1,$2,$3,$4,$5,true)
+			returning id, username, display_name, '' as password_hash, role, access_label, active
+		`, input.Username, input.DisplayName, hash, role, accessLabel).Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active)
+		return &user, err
+	}
+
+	if strings.TrimSpace(input.Password) != "" {
+		hash, err := security.HashPassword(input.Password)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := r.db.ExecContext(ctx, `update users set password_hash=$1 where id=$2`, hash, input.ID); err != nil {
+			return nil, err
+		}
+	}
+	var user User
+	err := r.db.QueryRowContext(ctx, `
+		update users
+		set username=$1, display_name=$2, role=$3, access_label=$4, active=$5, updated_at=now()
+		where id=$6
+		returning id, username, display_name, '' as password_hash, role, access_label, active
+	`, input.Username, input.DisplayName, role, accessLabel, input.Active, input.ID).Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active)
+	return &user, err
+}
+
+func (r *Repository) ListBusinesses(ctx context.Context) ([]Business, error) {
+	rows, err := r.db.QueryContext(ctx, `select id, name, active from businesses order by active desc, name asc`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	businesses := []Business{}
+	for rows.Next() {
+		var business Business
+		if err := rows.Scan(&business.ID, &business.Name, &business.Active); err != nil {
+			return nil, err
+		}
+		businesses = append(businesses, business)
+	}
+	return businesses, rows.Err()
+}
+
+func (r *Repository) SaveBusiness(ctx context.Context, input BusinessInput) (*Business, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return nil, fmt.Errorf("business name is required")
+	}
+	if input.ID == 0 {
+		input.Active = true
+	}
+	var business Business
+	if input.ID == 0 {
+		err := r.db.QueryRowContext(ctx, `
+			insert into businesses(name, active)
+			values($1, true)
+			on conflict (name) do update set active=true, updated_at=now()
+			returning id, name, active
+		`, name).Scan(&business.ID, &business.Name, &business.Active)
+		return &business, err
+	}
+	err := r.db.QueryRowContext(ctx, `
+		update businesses set name=$1, active=$2, updated_at=now()
+		where id=$3
+		returning id, name, active
+	`, name, input.Active, input.ID).Scan(&business.ID, &business.Name, &business.Active)
+	return &business, err
 }
 
 func (r *Repository) ListCustomers(ctx context.Context, search string) ([]Customer, error) {
@@ -160,11 +276,12 @@ func (r *Repository) DeleteVendor(ctx context.Context, id int64) error {
 func (r *Repository) ListPurchases(ctx context.Context, search string) ([]Purchase, error) {
 	search = strings.TrimSpace(search)
 	rows, err := r.db.QueryContext(ctx, `
-		select p.id, coalesce(v.id, 0), coalesce(v.vendor_name, ''), p.purchase_date::text, p.description, coalesce(pc.name, ''), p.amount, p.tax_paid, p.payment_method, p.notes, p.created_at::text
+		select p.id, coalesce(b.id, 0), coalesce(b.name, ''), coalesce(v.id, 0), coalesce(v.vendor_name, ''), p.purchase_date::text, p.description, coalesce(pc.name, ''), p.amount, p.tax_paid, p.payment_method, p.notes, p.created_at::text
 		from purchases p
+		left join businesses b on b.id = p.business_id
 		left join vendors v on v.id = p.vendor_id
 		left join purchase_categories pc on pc.id = p.category_id
-		where $1 = '' or p.description ilike '%' || $1 || '%' or coalesce(v.vendor_name, '') ilike '%' || $1 || '%' or coalesce(pc.name, '') ilike '%' || $1 || '%'
+		where $1 = '' or p.description ilike '%' || $1 || '%' or coalesce(v.vendor_name, '') ilike '%' || $1 || '%' or coalesce(pc.name, '') ilike '%' || $1 || '%' or coalesce(b.name, '') ilike '%' || $1 || '%'
 		order by p.purchase_date desc, p.created_at desc
 		limit 200
 	`, search)
@@ -176,7 +293,7 @@ func (r *Repository) ListPurchases(ctx context.Context, search string) ([]Purcha
 	purchases := []Purchase{}
 	for rows.Next() {
 		var purchase Purchase
-		if err := rows.Scan(&purchase.ID, &purchase.VendorID, &purchase.VendorName, &purchase.PurchaseDate, &purchase.Description, &purchase.CategoryName, &purchase.Amount, &purchase.TaxPaid, &purchase.PaymentMethod, &purchase.Notes, &purchase.CreatedAt); err != nil {
+		if err := rows.Scan(&purchase.ID, &purchase.BusinessID, &purchase.BusinessName, &purchase.VendorID, &purchase.VendorName, &purchase.PurchaseDate, &purchase.Description, &purchase.CategoryName, &purchase.Amount, &purchase.TaxPaid, &purchase.PaymentMethod, &purchase.Notes, &purchase.CreatedAt); err != nil {
 			return nil, err
 		}
 		purchases = append(purchases, purchase)
@@ -199,6 +316,7 @@ func (r *Repository) SavePurchase(ctx context.Context, input PurchaseInput) (*Pu
 	}
 	input.TaxPaid = math.Max(0, roundMoney(input.TaxPaid))
 	categoryName := fallback(strings.TrimSpace(input.CategoryName), "Uncategorized")
+	paymentMethod := normalizePaymentMethod(input.PaymentMethod)
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -214,13 +332,31 @@ func (r *Repository) SavePurchase(ctx context.Context, input PurchaseInput) (*Pu
 	if err != nil {
 		return nil, err
 	}
+	businessID, err := ensureBusinessID(ctx, tx, input.BusinessID)
+	if err != nil {
+		return nil, err
+	}
 
-	var purchaseID int64
-	err = tx.QueryRowContext(ctx, `
-		insert into purchases(vendor_id, purchase_date, description, category_id, amount, tax_paid, payment_method, notes)
-		values($1,$2,$3,$4,$5,$6,$7,$8)
-		returning id
-	`, nullInt64(vendorID), purchaseDate, input.Description, categoryID, input.Amount, input.TaxPaid, strings.TrimSpace(input.PaymentMethod), strings.TrimSpace(input.Notes)).Scan(&purchaseID)
+	purchaseID := input.ID
+	if purchaseID == 0 {
+		err = tx.QueryRowContext(ctx, `
+			insert into purchases(business_id, vendor_id, purchase_date, description, category_id, amount, tax_paid, payment_method, notes)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			returning id
+		`, businessID, nullInt64(vendorID), purchaseDate, input.Description, categoryID, input.Amount, input.TaxPaid, paymentMethod, strings.TrimSpace(input.Notes)).Scan(&purchaseID)
+	} else {
+		result, execErr := tx.ExecContext(ctx, `
+			update purchases
+			set business_id=$1, vendor_id=$2, purchase_date=$3, description=$4, category_id=$5, amount=$6, tax_paid=$7, payment_method=$8, notes=$9, updated_at=now()
+			where id=$10
+		`, businessID, nullInt64(vendorID), purchaseDate, input.Description, categoryID, input.Amount, input.TaxPaid, paymentMethod, strings.TrimSpace(input.Notes), purchaseID)
+		err = execErr
+		if err == nil {
+			if rows, rowsErr := result.RowsAffected(); rowsErr == nil && rows == 0 {
+				err = fmt.Errorf("purchase not found")
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -228,6 +364,36 @@ func (r *Repository) SavePurchase(ctx context.Context, input PurchaseInput) (*Pu
 		return nil, err
 	}
 	return r.getPurchase(ctx, purchaseID)
+}
+
+func (r *Repository) DeletePurchase(ctx context.Context, id int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `update statement_transactions set saved_purchase_id=null where saved_purchase_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `delete from purchases where id=$1`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) DeleteInvoice(ctx context.Context, id int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `update purchases set related_invoice_id=null where related_invoice_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `delete from invoices where id=$1`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) CreateInvoice(ctx context.Context, input InvoiceInput) (*InvoiceDetail, error) {
@@ -251,6 +417,10 @@ func (r *Repository) CreateInvoice(ctx context.Context, input InvoiceInput) (*In
 		return nil, err
 	}
 	customer, err := r.getCustomer(ctx, input.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	businessID, err := r.ensureBusinessID(ctx, input.BusinessID)
 	if err != nil {
 		return nil, err
 	}
@@ -299,10 +469,10 @@ func (r *Repository) CreateInvoice(ctx context.Context, input InvoiceInput) (*In
 
 	var invoiceID int64
 	err = tx.QueryRowContext(ctx, `
-		insert into invoices(invoice_number, invoice_date, due_date, customer_id, subtotal, discount_amount, tax_amount, total_amount, notes, terms)
-		values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		insert into invoices(business_id, invoice_number, invoice_date, due_date, customer_id, subtotal, discount_amount, tax_amount, total_amount, notes, terms)
+		values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		returning id
-	`, invoiceNumber, invoiceDate, dueDate, input.CustomerID, subtotal, discount, tax, total, input.Notes, fallback(input.Terms, settings.InvoiceTerms)).Scan(&invoiceID)
+	`, businessID, invoiceNumber, invoiceDate, dueDate, input.CustomerID, subtotal, discount, tax, total, input.Notes, fallback(input.Terms, settings.InvoiceTerms)).Scan(&invoiceID)
 	if err != nil {
 		return nil, err
 	}
@@ -367,33 +537,50 @@ func (r *Repository) RecordWalkInService(ctx context.Context, input WalkInServic
 	if err != nil {
 		return nil, err
 	}
-
-	var taxableSubtotal float64
-	if settings.PartsTaxable {
-		taxableSubtotal += partsCost
-	}
-	if settings.LaborTaxable {
-		taxableSubtotal += serviceCharge
-	}
-	tax := roundMoney(taxableSubtotal * settings.DefaultTaxRate)
-	subtotal := roundMoney(partsCost + serviceCharge)
-	total := roundMoney(subtotal + tax)
-
-	var sequence int64
-	if err := tx.QueryRowContext(ctx, `select nextval('invoice_number_seq')`).Scan(&sequence); err != nil {
-		return nil, err
-	}
-	invoiceNumber := fmt.Sprintf("%s-%06d", settings.InvoicePrefix, sequence)
-	notes := buildServiceNotes(input)
-
-	var invoiceID int64
-	err = tx.QueryRowContext(ctx, `
-		insert into invoices(invoice_number, invoice_date, due_date, customer_id, subtotal, tax_amount, total_amount, notes, terms)
-		values($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		returning id
-	`, invoiceNumber, serviceDate, serviceDate, customerID, subtotal, tax, total, notes, fallback(settings.InvoiceTerms, "Payment due on receipt.")).Scan(&invoiceID)
+	businessID, err := ensureBusinessID(ctx, tx, input.BusinessID)
 	if err != nil {
 		return nil, err
+	}
+
+	subtotal := roundMoney(partsCost + serviceCharge)
+	tax := 0.0
+	total := subtotal
+
+	notes := buildServiceNotes(input)
+
+	invoiceID := input.ID
+	if invoiceID == 0 {
+		var sequence int64
+		if err := tx.QueryRowContext(ctx, `select nextval('invoice_number_seq')`).Scan(&sequence); err != nil {
+			return nil, err
+		}
+		invoiceNumber := fmt.Sprintf("%s-%06d", settings.InvoicePrefix, sequence)
+		err = tx.QueryRowContext(ctx, `
+			insert into invoices(business_id, invoice_number, invoice_date, due_date, customer_id, subtotal, tax_amount, total_amount, notes, terms)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			returning id
+		`, businessID, invoiceNumber, serviceDate, serviceDate, customerID, subtotal, tax, total, notes, fallback(settings.InvoiceTerms, "Payment due on receipt.")).Scan(&invoiceID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		result, err := tx.ExecContext(ctx, `
+			update invoices
+			set business_id=$1, invoice_date=$2, due_date=$2, customer_id=$3, subtotal=$4, discount_amount=0, tax_amount=$5, total_amount=$6, notes=$7, terms=$8, updated_at=now()
+			where id=$9
+		`, businessID, serviceDate, customerID, subtotal, tax, total, notes, fallback(settings.InvoiceTerms, "Payment due on receipt."), invoiceID)
+		if err != nil {
+			return nil, err
+		}
+		if rows, err := result.RowsAffected(); err == nil && rows == 0 {
+			return nil, fmt.Errorf("invoice not found")
+		}
+		if _, err := tx.ExecContext(ctx, `delete from invoice_items where invoice_id=$1`, invoiceID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `delete from payments where invoice_id=$1`, invoiceID); err != nil {
+			return nil, err
+		}
 	}
 
 	position := 0
@@ -431,6 +618,10 @@ func (r *Repository) RecordWalkInService(ctx context.Context, input WalkInServic
 		if _, err := tx.ExecContext(ctx, `update invoices set paid_amount=$1, status=$2, updated_at=now() where id=$3`, amountPaid, status, invoiceID); err != nil {
 			return nil, err
 		}
+	} else if input.ID != 0 {
+		if _, err := tx.ExecContext(ctx, `update invoices set paid_amount=0, status='unpaid', updated_at=now() where id=$1`, invoiceID); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -442,10 +633,11 @@ func (r *Repository) RecordWalkInService(ctx context.Context, input WalkInServic
 func (r *Repository) ListInvoices(ctx context.Context, search string) ([]InvoiceListItem, error) {
 	search = strings.TrimSpace(search)
 	rows, err := r.db.QueryContext(ctx, `
-		select i.id, i.invoice_number, i.invoice_date::text, i.due_date::text, c.full_name, i.status, i.total_amount, i.paid_amount, i.created_at::text
+		select i.id, coalesce(b.id, 0), coalesce(b.name, ''), i.invoice_number, i.invoice_date::text, i.due_date::text, c.full_name, i.status, i.total_amount, i.paid_amount, i.created_at::text
 		from invoices i
 		join customers c on c.id = i.customer_id
-		where $1 = '' or i.invoice_number ilike '%' || $1 || '%' or c.full_name ilike '%' || $1 || '%' or c.company_name ilike '%' || $1 || '%'
+		left join businesses b on b.id = i.business_id
+		where $1 = '' or i.invoice_number ilike '%' || $1 || '%' or c.full_name ilike '%' || $1 || '%' or c.company_name ilike '%' || $1 || '%' or coalesce(b.name, '') ilike '%' || $1 || '%'
 		order by i.created_at desc
 		limit 200
 	`, search)
@@ -457,7 +649,7 @@ func (r *Repository) ListInvoices(ctx context.Context, search string) ([]Invoice
 	invoices := []InvoiceListItem{}
 	for rows.Next() {
 		var invoice InvoiceListItem
-		if err := rows.Scan(&invoice.ID, &invoice.InvoiceNumber, &invoice.InvoiceDate, &invoice.DueDate, &invoice.CustomerName, &invoice.Status, &invoice.TotalAmount, &invoice.PaidAmount, &invoice.CreatedAt); err != nil {
+		if err := rows.Scan(&invoice.ID, &invoice.BusinessID, &invoice.BusinessName, &invoice.InvoiceNumber, &invoice.InvoiceDate, &invoice.DueDate, &invoice.CustomerName, &invoice.Status, &invoice.TotalAmount, &invoice.PaidAmount, &invoice.CreatedAt); err != nil {
 			return nil, err
 		}
 		invoices = append(invoices, invoice)
@@ -468,16 +660,20 @@ func (r *Repository) ListInvoices(ctx context.Context, search string) ([]Invoice
 func (r *Repository) GetInvoice(ctx context.Context, id int64) (*InvoiceDetail, error) {
 	var invoice InvoiceDetail
 	err := r.db.QueryRowContext(ctx, `
-		select i.id, i.invoice_number, i.invoice_date::text, i.due_date::text,
+		select i.id, coalesce(b.id, 0), coalesce(b.name, ''), i.invoice_number, i.invoice_date::text, i.due_date::text,
 			c.id, c.full_name, c.company_name, c.email, c.phone, c.billing_address, c.service_address, c.tax_exempt, c.notes, c.created_at::text, c.updated_at::text,
-			i.status, i.subtotal, i.discount_amount, i.tax_amount, i.total_amount, i.paid_amount, i.notes, i.terms, i.created_at::text, i.updated_at::text
+			i.status, i.subtotal, i.discount_amount, i.tax_amount, i.total_amount, i.paid_amount,
+			coalesce((select p.payment_date::text from payments p where p.invoice_id = i.id order by p.payment_date desc, p.id desc limit 1), ''),
+			coalesce((select p.method from payments p where p.invoice_id = i.id order by p.payment_date desc, p.id desc limit 1), ''),
+			i.notes, i.terms, i.created_at::text, i.updated_at::text
 		from invoices i
 		join customers c on c.id = i.customer_id
+		left join businesses b on b.id = i.business_id
 		where i.id=$1
 	`, id).Scan(
-		&invoice.ID, &invoice.InvoiceNumber, &invoice.InvoiceDate, &invoice.DueDate,
+		&invoice.ID, &invoice.BusinessID, &invoice.BusinessName, &invoice.InvoiceNumber, &invoice.InvoiceDate, &invoice.DueDate,
 		&invoice.Customer.ID, &invoice.Customer.FullName, &invoice.Customer.CompanyName, &invoice.Customer.Email, &invoice.Customer.Phone, &invoice.Customer.BillingAddress, &invoice.Customer.ServiceAddress, &invoice.Customer.TaxExempt, &invoice.Customer.Notes, &invoice.Customer.CreatedAt, &invoice.Customer.UpdatedAt,
-		&invoice.Status, &invoice.Subtotal, &invoice.DiscountAmount, &invoice.TaxAmount, &invoice.TotalAmount, &invoice.PaidAmount, &invoice.Notes, &invoice.Terms, &invoice.CreatedAt, &invoice.UpdatedAt,
+		&invoice.Status, &invoice.Subtotal, &invoice.DiscountAmount, &invoice.TaxAmount, &invoice.TotalAmount, &invoice.PaidAmount, &invoice.PaymentDate, &invoice.PaymentMethod, &invoice.Notes, &invoice.Terms, &invoice.CreatedAt, &invoice.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -657,6 +853,47 @@ func (r *Repository) GetIncomeExpenseReport(ctx context.Context, period string, 
 	return r.getMonthlyIncomeExpenseReport(ctx, year)
 }
 
+func (r *Repository) GetTaxReport(ctx context.Context, startDate string, endDate string, businessID int64) (*TaxReportSummary, error) {
+	start, err := parseDate(startDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start date")
+	}
+	end, err := parseDate(endDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end date")
+	}
+	if end.Before(start) {
+		return nil, fmt.Errorf("end date must be after start date")
+	}
+	report := &TaxReportSummary{
+		StartDate:  start.Format("2006-01-02"),
+		EndDate:    end.Format("2006-01-02"),
+		BusinessID: businessID,
+	}
+	if businessID != 0 {
+		_ = r.db.QueryRowContext(ctx, `select name from businesses where id=$1`, businessID).Scan(&report.BusinessName)
+	}
+	_ = r.db.QueryRowContext(ctx, `
+		select coalesce(sum(subtotal), 0), coalesce(sum(tax_amount), 0)
+		from invoices
+		where invoice_date between $1 and $2 and ($3::bigint = 0 or business_id = $3)
+	`, start, end, businessID).Scan(&report.GrossSales, &report.SalesTaxCollected)
+	_ = r.db.QueryRowContext(ctx, `
+		select coalesce(sum(ii.line_total), 0)
+		from invoice_items ii
+		join invoices i on i.id = ii.invoice_id
+		where i.invoice_date between $1 and $2 and ii.taxable = true and ($3::bigint = 0 or i.business_id = $3)
+	`, start, end, businessID).Scan(&report.TaxableSales)
+	report.NonTaxableSales = roundMoney(math.Max(0, report.GrossSales-report.TaxableSales))
+	_ = r.db.QueryRowContext(ctx, `
+		select coalesce(sum(amount), 0)
+		from purchases
+		where purchase_date between $1 and $2 and ($3::bigint = 0 or business_id = $3)
+	`, start, end, businessID).Scan(&report.TotalPurchases)
+	report.NetIncome = roundMoney(report.GrossSales - report.TotalPurchases)
+	return report, nil
+}
+
 func (r *Repository) getMonthlyIncomeExpenseReport(ctx context.Context, year int) (*IncomeExpenseReport, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		with months as (
@@ -760,16 +997,26 @@ func (r *Repository) getCustomer(ctx context.Context, id int64) (*Customer, erro
 func (r *Repository) getPurchase(ctx context.Context, id int64) (*Purchase, error) {
 	var purchase Purchase
 	err := r.db.QueryRowContext(ctx, `
-		select p.id, coalesce(v.id, 0), coalesce(v.vendor_name, ''), p.purchase_date::text, p.description, coalesce(pc.name, ''), p.amount, p.tax_paid, p.payment_method, p.notes, p.created_at::text
+		select p.id, coalesce(b.id, 0), coalesce(b.name, ''), coalesce(v.id, 0), coalesce(v.vendor_name, ''), p.purchase_date::text, p.description, coalesce(pc.name, ''), p.amount, p.tax_paid, p.payment_method, p.notes, p.created_at::text
 		from purchases p
+		left join businesses b on b.id = p.business_id
 		left join vendors v on v.id = p.vendor_id
 		left join purchase_categories pc on pc.id = p.category_id
 		where p.id=$1
-	`, id).Scan(&purchase.ID, &purchase.VendorID, &purchase.VendorName, &purchase.PurchaseDate, &purchase.Description, &purchase.CategoryName, &purchase.Amount, &purchase.TaxPaid, &purchase.PaymentMethod, &purchase.Notes, &purchase.CreatedAt)
+	`, id).Scan(&purchase.ID, &purchase.BusinessID, &purchase.BusinessName, &purchase.VendorID, &purchase.VendorName, &purchase.PurchaseDate, &purchase.Description, &purchase.CategoryName, &purchase.Amount, &purchase.TaxPaid, &purchase.PaymentMethod, &purchase.Notes, &purchase.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return &purchase, nil
+}
+
+func (r *Repository) ensureBusinessID(ctx context.Context, businessID int64) (int64, error) {
+	if businessID != 0 {
+		return businessID, nil
+	}
+	var id int64
+	err := r.db.QueryRowContext(ctx, `select id from businesses where active = true order by id limit 1`).Scan(&id)
+	return id, err
 }
 
 func ensureCustomer(ctx context.Context, tx *sql.Tx, input CustomerInput) (int64, error) {
@@ -831,6 +1078,24 @@ func ensurePurchaseCategory(ctx context.Context, tx *sql.Tx, categoryName string
 	return id, err
 }
 
+func ensureBusinessID(ctx context.Context, tx *sql.Tx, businessID int64) (int64, error) {
+	if businessID != 0 {
+		return businessID, nil
+	}
+	var id int64
+	var err error
+	query := `select id from businesses where active = true order by id limit 1`
+	if tx != nil {
+		err = tx.QueryRowContext(ctx, query).Scan(&id)
+	} else {
+		return 0, fmt.Errorf("business is required")
+	}
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
 func buildServiceDescription(input WalkInServiceInput) string {
 	parts := []string{}
 	device := strings.TrimSpace(strings.Join([]string{input.Device, input.Make, input.Model}, " "))
@@ -869,17 +1134,30 @@ func buildServiceNotes(input WalkInServiceInput) string {
 }
 
 func normalizePaymentMethod(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
+	cleaned := strings.TrimSpace(value)
+	switch strings.ToLower(cleaned) {
 	case "cash":
-		return "cash"
+		return "Cash"
 	case "card", "credit", "credit card", "debit", "debit card":
-		return "card"
+		return "Card"
+	case "cashapp", "cash app":
+		return "CashApp"
+	case "venmo":
+		return "Venmo"
 	case "check", "cheque":
-		return "check"
+		return "Check"
+	case "applepay", "apple pay":
+		return "ApplePay"
+	case "googlepay", "google pay":
+		return "GooglePay"
+	case "paypal", "pay pal":
+		return "PayPal"
 	case "zelle":
-		return "zelle"
+		return "Zelle"
+	case "":
+		return "Cash"
 	default:
-		return "other"
+		return cleaned
 	}
 }
 

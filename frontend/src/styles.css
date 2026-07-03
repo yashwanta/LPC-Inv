@@ -162,8 +162,11 @@ input:focus, textarea:focus, select:focus { border-color: #1f6f58; box-shadow: 0
 .dangerButton { background: #fff5f3; border-color: #efb7ad; color: #a13725; }
 .dark .dangerButton { background: #3a221f; border-color: #7f463b; color: #ffb8aa; }
 .iconButton { width: 38px; padding: 0; background: #ffffff; border-color: #cbd7d1; color: #21332b; }
+.dangerIconButton { background: #fff5f3; border-color: #efb7ad; color: #a13725; }
 .dark .iconButton { background: #1d2421; color: #edf2ef; border-color: #44564d; }
+.dark .dangerIconButton { background: #3a221f; border-color: #7f463b; color: #ffb8aa; }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
+.inlineField { margin-top: 6px; }
 
 .notice, .error, .stateMessage {
   min-height: 40px;
@@ -191,10 +194,13 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .placeholder h2 { margin: 0 0 6px; }
 .reportToolbar {
   display: grid;
-  grid-template-columns: auto 180px;
+  grid-template-columns: minmax(220px, 1fr) 160px 160px auto auto;
   gap: 12px;
   align-items: end;
   justify-content: start;
+}
+.importPanel {
+  max-width: 760px;
 }
 .reportPanel {
   min-width: 0;
@@ -248,6 +254,27 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   gap: 10px;
   align-items: center;
 }
+.importTableHeader, .importTableRow {
+  display: grid;
+  grid-template-columns: 120px minmax(150px, 1fr) minmax(220px, 1.3fr) 150px 120px;
+  gap: 10px;
+  align-items: center;
+}
+.importTableHeader {
+  color: #607168;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.dark .importTableHeader { color: #aebbb5; }
+.importTableRow {
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid #e2e9e5;
+  border-radius: 6px;
+  background: #fbfcfb;
+}
+.dark .importTableRow { background: #18201d; border-color: #314039; }
 .reportTableHeader {
   color: #607168;
   font-size: 12px;

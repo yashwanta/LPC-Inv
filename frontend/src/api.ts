@@ -6,6 +6,36 @@
   token: string;
 };
 
+export type User = {
+  id: number;
+  username: string;
+  displayName: string;
+  role: "admin" | "standard";
+  accessLabel: string;
+  active: boolean;
+};
+
+export type UserInput = {
+  id?: number;
+  username: string;
+  displayName: string;
+  password: string;
+  role: "admin" | "standard";
+  accessLabel: string;
+  active: boolean;
+};
+
+export type Business = {
+  id: number;
+  name: string;
+  active: boolean;
+};
+
+export type BusinessInput = {
+  id?: number;
+  name: string;
+  active: boolean;
+};
 export type Customer = {
   id: number;
   fullName: string;
@@ -39,6 +69,8 @@ export type Vendor = {
 
 export type Purchase = {
   id: number;
+  businessId: number;
+  businessName: string;
   vendorId: number;
   vendorName: string;
   purchaseDate: string;
@@ -52,6 +84,8 @@ export type Purchase = {
 };
 
 export type PurchaseInput = {
+  id?: number;
+  businessId: number;
   purchaseDate: string;
   vendorName: string;
   description: string;
@@ -64,6 +98,8 @@ export type PurchaseInput = {
 
 export type InvoiceListItem = {
   id: number;
+  businessId: number;
+  businessName: string;
   invoiceNumber: string;
   invoiceDate: string;
   dueDate: string;
@@ -82,6 +118,7 @@ export type InvoiceItemInput = {
 };
 
 export type InvoiceInput = {
+  businessId: number;
   customerId: number;
   invoiceDate: string;
   dueDate: string;
@@ -92,6 +129,8 @@ export type InvoiceInput = {
 };
 
 export type WalkInServiceInput = {
+  id?: number;
+  businessId: number;
   serviceDate: string;
   firstName: string;
   lastName: string;
@@ -112,6 +151,39 @@ export type WalkInServiceInput = {
   notes: string;
 };
 
+export type InvoiceDetail = {
+  id: number;
+  businessId: number;
+  businessName: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string;
+  customer: Customer;
+  status: string;
+  subtotal: number;
+  discountAmount: number;
+  taxAmount: number;
+  totalAmount: number;
+  paidAmount: number;
+  notes: string;
+  terms: string;
+  paymentDate: string;
+  paymentMethod: string;
+  items: Array<InvoiceItemInput & { id: number; lineTotal: number; position: number }>;
+};
+
+export type TaxReportSummary = {
+  startDate: string;
+  endDate: string;
+  businessId: number;
+  businessName: string;
+  grossSales: number;
+  taxableSales: number;
+  nonTaxableSales: number;
+  salesTaxCollected: number;
+  totalPurchases: number;
+  netIncome: number;
+};
 export type AppSettings = {
   businessName: string;
   businessAddress: string;
@@ -180,6 +252,8 @@ let demoCustomerId = 4;
 let demoVendorId = 3;
 let demoInvoiceId = 4;
 let demoPurchaseId = 3;
+let demoUserId = 2;
+let demoBusinessId = 2;
 
 let demoSettings: AppSettings = {
   businessName: "SimpleTech Books",
@@ -201,6 +275,14 @@ let demoSettings: AppSettings = {
   smtpFromName: "SimpleTech Books",
   smtpUseTLS: true
 };
+
+let demoUsers: User[] = [
+  { id: 1, username: "admin", displayName: "Administrator", role: "admin", accessLabel: "Full Access", active: true }
+];
+
+let demoBusinesses: Business[] = [
+  { id: 1, name: "SimpleTech Books", active: true }
+];
 
 let demoCustomers: Customer[] = [
   {
@@ -244,14 +326,14 @@ let demoVendors: Vendor[] = [
 ];
 
 let demoInvoices: InvoiceListItem[] = [
-  { id: 1, invoiceNumber: "INV-001001", invoiceDate: "2026-06-10", dueDate: "2026-06-24", customerName: "Jordan Lee", status: "unpaid", totalAmount: 189.2, paidAmount: 0 },
-  { id: 2, invoiceNumber: "INV-001002", invoiceDate: "2026-06-20", dueDate: "2026-07-04", customerName: "Walk-in Customer", status: "paid", totalAmount: 95, paidAmount: 95 },
-  { id: 3, invoiceNumber: "INV-001003", invoiceDate: "2026-06-22", dueDate: "2026-07-06", customerName: "Jordan Lee", status: "paid", totalAmount: 255.8, paidAmount: 255.8 }
+  { id: 1, businessId: 1, businessName: "SimpleTech Books", invoiceNumber: "INV-001001", invoiceDate: "2026-06-10", dueDate: "2026-06-24", customerName: "Jordan Lee", status: "unpaid", totalAmount: 189.2, paidAmount: 0 },
+  { id: 2, businessId: 1, businessName: "SimpleTech Books", invoiceNumber: "INV-001002", invoiceDate: "2026-06-20", dueDate: "2026-07-04", customerName: "Walk-in Customer", status: "paid", totalAmount: 95, paidAmount: 95 },
+  { id: 3, businessId: 1, businessName: "SimpleTech Books", invoiceNumber: "INV-001003", invoiceDate: "2026-06-22", dueDate: "2026-07-06", customerName: "Jordan Lee", status: "paid", totalAmount: 255.8, paidAmount: 255.8 }
 ];
 
 let demoPurchases: Purchase[] = [
-  { id: 1, vendorId: 1, vendorName: "Amazon Business", purchaseDate: "2026-06-14", description: "Replacement SSD", categoryName: "Computer parts", amount: 72.49, taxPaid: 0, paymentMethod: "card", notes: "", createdAt: "2026-06-14" },
-  { id: 2, vendorId: 2, vendorName: "Dell", purchaseDate: "2026-06-18", description: "Laptop screen", categoryName: "Computer parts", amount: 119.95, taxPaid: 0, paymentMethod: "card", notes: "", createdAt: "2026-06-18" }
+  { id: 1, businessId: 1, businessName: "SimpleTech Books", vendorId: 1, vendorName: "Amazon Business", purchaseDate: "2026-06-14", description: "Replacement SSD", categoryName: "Computer parts", amount: 72.49, taxPaid: 0, paymentMethod: "card", notes: "", createdAt: "2026-06-14" },
+  { id: 2, businessId: 1, businessName: "SimpleTech Books", vendorId: 2, vendorName: "Dell", purchaseDate: "2026-06-18", description: "Laptop screen", categoryName: "Computer parts", amount: 119.95, taxPaid: 0, paymentMethod: "card", notes: "", createdAt: "2026-06-18" }
 ];
 
 function inDemoMode() {
@@ -315,6 +397,43 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
         netIncome: rows.reduce((sum, row) => sum + row.net, 0)
       } as T;
     }
+    case "GetTaxReport": {
+      const startDate = String(args[0] || "");
+      const endDate = String(args[1] || "");
+      const businessId = Number(args[2] || 0);
+      const invoices = demoInvoices.filter((row) => (!businessId || row.businessId === businessId) && (!startDate || row.invoiceDate >= startDate) && (!endDate || row.invoiceDate <= endDate));
+      const purchases = demoPurchases.filter((row) => (!businessId || row.businessId === businessId) && (!startDate || row.purchaseDate >= startDate) && (!endDate || row.purchaseDate <= endDate));
+      const grossSales = invoices.reduce((sum, row) => sum + row.totalAmount, 0);
+      const totalPurchases = purchases.reduce((sum, row) => sum + row.amount, 0);
+      return {
+        startDate,
+        endDate,
+        businessId,
+        businessName: demoBusinesses.find((row) => row.id === businessId)?.name || "All businesses",
+        grossSales,
+        taxableSales: grossSales,
+        nonTaxableSales: 0,
+        salesTaxCollected: 14.2,
+        totalPurchases,
+        netIncome: grossSales - totalPurchases
+      } as T;
+    }
+    case "ListUsers":
+      return demoUsers as T;
+    case "SaveUser": {
+      const input = args[0] as UserInput;
+      const saved: User = { id: input.id || demoUserId++, username: input.username, displayName: input.displayName, role: input.role, accessLabel: input.accessLabel, active: input.active };
+      demoUsers = input.id ? demoUsers.map((row) => row.id === input.id ? saved : row) : [saved, ...demoUsers];
+      return saved as T;
+    }
+    case "ListBusinesses":
+      return demoBusinesses as T;
+    case "SaveBusiness": {
+      const input = args[0] as BusinessInput;
+      const saved: Business = { id: input.id || demoBusinessId++, name: input.name, active: input.active };
+      demoBusinesses = input.id ? demoBusinesses.map((row) => row.id === input.id ? saved : row) : [saved, ...demoBusinesses];
+      return saved as T;
+    }
     case "ListCustomers": {
       const search = String(args[0] || "");
       return demoCustomers.filter((row) => !search || filterText(`${row.fullName} ${row.companyName} ${row.email} ${row.phone}`, search)) as T;
@@ -355,7 +474,9 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
       const input = args[0] as PurchaseInput;
       const vendor = demoVendors.find((row) => row.vendorName.toLowerCase() === input.vendorName.toLowerCase());
       const saved: Purchase = {
-        id: demoPurchaseId++,
+        id: input.id || demoPurchaseId++,
+        businessId: input.businessId || 1,
+        businessName: demoBusinesses.find((row) => row.id === input.businessId)?.name || "SimpleTech Books",
         vendorId: vendor?.id || 0,
         vendorName: input.vendorName,
         purchaseDate: input.purchaseDate,
@@ -367,8 +488,43 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
         notes: input.notes,
         createdAt: input.purchaseDate
       };
-      demoPurchases = [saved, ...demoPurchases];
+      demoPurchases = input.id ? demoPurchases.map((row) => row.id === input.id ? saved : row) : [saved, ...demoPurchases];
       return saved as T;
+    }
+    case "DeletePurchase":
+      demoPurchases = demoPurchases.filter((row) => row.id !== Number(args[0]));
+      return undefined as T;
+    case "GetInvoice": {
+      const id = Number(args[0]);
+      const invoice = demoInvoices.find((row) => row.id === id);
+      if (!invoice) throw new Error("Invoice not found");
+      const customer = demoCustomers.find((row) => row.fullName === invoice.customerName) || {
+        id: 0,
+        fullName: invoice.customerName,
+        companyName: "",
+        email: "",
+        phone: "",
+        billingAddress: "",
+        serviceAddress: "",
+        taxExempt: false,
+        notes: ""
+      };
+      return {
+        ...invoice,
+        businessId: invoice.businessId,
+        businessName: invoice.businessName,
+        customer,
+        subtotal: invoice.totalAmount,
+        discountAmount: 0,
+        taxAmount: 0,
+        notes: "",
+        terms: "",
+        paymentDate: invoice.invoiceDate,
+        paymentMethod: "cash",
+        items: [
+          { id: 1, itemType: "labor", description: "Walk-in service charge", quantity: 1, unitPrice: invoice.totalAmount, taxable: false, lineTotal: invoice.totalAmount, position: 0 }
+        ]
+      } as T;
     }
     case "CreateInvoice": {
       const input = args[0] as InvoiceInput;
@@ -376,6 +532,8 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
       const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       const saved: InvoiceListItem = {
         id: demoInvoiceId++,
+        businessId: input.businessId || 1,
+        businessName: demoBusinesses.find((row) => row.id === input.businessId)?.name || "SimpleTech Books",
         invoiceNumber: `${demoSettings.invoicePrefix}-00${1000 + demoInvoiceId}`,
         invoiceDate: input.invoiceDate,
         dueDate: input.dueDate,
@@ -393,7 +551,9 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
       const totalAmount = Math.round((input.partsCost + input.serviceCharge) * 100) / 100;
       const paidAmount = Math.min(totalAmount, input.amountPaid);
       const saved: InvoiceListItem = {
-        id: demoInvoiceId++,
+        id: input.id || demoInvoiceId++,
+        businessId: input.businessId || 1,
+        businessName: demoBusinesses.find((row) => row.id === input.businessId)?.name || "SimpleTech Books",
         invoiceNumber: `${demoSettings.invoicePrefix}-00${1000 + demoInvoiceId}`,
         invoiceDate: input.serviceDate,
         dueDate: input.serviceDate,
@@ -402,9 +562,12 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
         totalAmount,
         paidAmount
       };
-      demoInvoices = [saved, ...demoInvoices];
+      demoInvoices = input.id ? demoInvoices.map((row) => row.id === input.id ? saved : row) : [saved, ...demoInvoices];
       return saved as T;
     }
+    case "DeleteInvoice":
+      demoInvoices = demoInvoices.filter((row) => row.id !== Number(args[0]));
+      return undefined as T;
     case "ExportInvoicePDF":
       return "Browser preview: PDF export works in the Wails desktop app." as T;
     case "GetSettings":
@@ -439,6 +602,11 @@ export const api = {
   login: (username: string, password: string) => call<AuthSession>("Login", username, password),
   dashboard: () => call<DashboardSummary>("GetDashboard"),
   incomeExpenseReport: (period: IncomeExpensePeriod, year: number) => call<IncomeExpenseReport>("GetIncomeExpenseReport", period, year),
+  taxReport: (startDate: string, endDate: string, businessId = 0) => call<TaxReportSummary>("GetTaxReport", startDate, endDate, businessId),
+  listUsers: () => call<User[]>("ListUsers"),
+  saveUser: (user: UserInput) => call<User>("SaveUser", user),
+  listBusinesses: () => call<Business[]>("ListBusinesses"),
+  saveBusiness: (business: BusinessInput) => call<Business>("SaveBusiness", business),
   listCustomers: (search = "") => call<Customer[]>("ListCustomers", search),
   listCustomerLookup: (search = "", kind = "all") => call<CustomerLookup[]>("ListCustomerLookup", search, kind),
   saveCustomer: (customer: Partial<Customer>) => call<Customer>("SaveCustomer", customer),
@@ -448,9 +616,12 @@ export const api = {
   deleteVendor: (id: number) => call<void>("DeleteVendor", id),
   listPurchases: (search = "") => call<Purchase[]>("ListPurchases", search),
   savePurchase: (purchase: PurchaseInput) => call<Purchase>("SavePurchase", purchase),
+  deletePurchase: (id: number) => call<void>("DeletePurchase", id),
   listInvoices: (search = "") => call<InvoiceListItem[]>("ListInvoices", search),
+  getInvoice: (id: number) => call<InvoiceDetail>("GetInvoice", id),
   createInvoice: (invoice: InvoiceInput) => call<unknown>("CreateInvoice", invoice),
   recordWalkInService: (entry: WalkInServiceInput) => call<unknown>("RecordWalkInService", entry),
+  deleteInvoice: (id: number) => call<void>("DeleteInvoice", id),
   exportInvoicePDF: (id: number) => call<string>("ExportInvoicePDF", id),
   getSettings: () => call<AppSettings>("GetSettings"),
   saveSettings: (settings: AppSettings) => call<AppSettings>("SaveSettings", settings),
@@ -458,3 +629,8 @@ export const api = {
   getImageDataURL: (path: string) => call<string>("GetImageDataURL", path),
   emailInvoice: (input: EmailInvoiceInput) => call<void>("EmailInvoice", input)
 };
+
+
+
+
+

@@ -88,6 +88,41 @@ func (a *App) GetIncomeExpenseReport(period string, year int) (*repository.Incom
 	return a.repo.GetIncomeExpenseReport(a.ctx, period, year)
 }
 
+func (a *App) GetTaxReport(startDate string, endDate string, businessID int64) (*repository.TaxReportSummary, error) {
+	if err := a.healthCheck(); err != nil {
+		return nil, err
+	}
+	return a.repo.GetTaxReport(a.ctx, startDate, endDate, businessID)
+}
+
+func (a *App) ListUsers() ([]repository.User, error) {
+	if err := a.healthCheck(); err != nil {
+		return nil, err
+	}
+	return a.repo.ListUsers(a.ctx)
+}
+
+func (a *App) SaveUser(input repository.UserInput) (*repository.User, error) {
+	if err := a.healthCheck(); err != nil {
+		return nil, err
+	}
+	return a.repo.SaveUser(a.ctx, input)
+}
+
+func (a *App) ListBusinesses() ([]repository.Business, error) {
+	if err := a.healthCheck(); err != nil {
+		return nil, err
+	}
+	return a.repo.ListBusinesses(a.ctx)
+}
+
+func (a *App) SaveBusiness(input repository.BusinessInput) (*repository.Business, error) {
+	if err := a.healthCheck(); err != nil {
+		return nil, err
+	}
+	return a.repo.SaveBusiness(a.ctx, input)
+}
+
 func (a *App) ListCustomers(search string) ([]repository.Customer, error) {
 	if err := a.healthCheck(); err != nil {
 		return nil, err
@@ -144,6 +179,13 @@ func (a *App) SavePurchase(input repository.PurchaseInput) (*repository.Purchase
 	return a.repo.SavePurchase(a.ctx, input)
 }
 
+func (a *App) DeletePurchase(id int64) error {
+	if err := a.healthCheck(); err != nil {
+		return err
+	}
+	return a.repo.DeletePurchase(a.ctx, id)
+}
+
 func (a *App) ListInvoices(search string) ([]repository.InvoiceListItem, error) {
 	if err := a.healthCheck(); err != nil {
 		return nil, err
@@ -163,6 +205,13 @@ func (a *App) RecordWalkInService(input repository.WalkInServiceInput) (*reposit
 		return nil, err
 	}
 	return a.repo.RecordWalkInService(a.ctx, input)
+}
+
+func (a *App) DeleteInvoice(id int64) error {
+	if err := a.healthCheck(); err != nil {
+		return err
+	}
+	return a.repo.DeleteInvoice(a.ctx, id)
 }
 
 func (a *App) GetInvoice(id int64) (*repository.InvoiceDetail, error) {
