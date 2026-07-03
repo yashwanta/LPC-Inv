@@ -67,6 +67,31 @@ type VendorInput struct {
 	Notes       string `json:"notes"`
 }
 
+type Purchase struct {
+	ID            int64   `json:"id"`
+	VendorID      int64   `json:"vendorId"`
+	VendorName    string  `json:"vendorName"`
+	PurchaseDate  string  `json:"purchaseDate"`
+	Description   string  `json:"description"`
+	CategoryName  string  `json:"categoryName"`
+	Amount        float64 `json:"amount"`
+	TaxPaid       float64 `json:"taxPaid"`
+	PaymentMethod string  `json:"paymentMethod"`
+	Notes         string  `json:"notes"`
+	CreatedAt     string  `json:"createdAt"`
+}
+
+type PurchaseInput struct {
+	PurchaseDate  string  `json:"purchaseDate"`
+	VendorName    string  `json:"vendorName"`
+	Description   string  `json:"description"`
+	CategoryName  string  `json:"categoryName"`
+	Amount        float64 `json:"amount"`
+	TaxPaid       float64 `json:"taxPaid"`
+	PaymentMethod string  `json:"paymentMethod"`
+	Notes         string  `json:"notes"`
+}
+
 type InvoiceItemInput struct {
 	ItemType    string  `json:"itemType"`
 	Description string  `json:"description"`
@@ -83,6 +108,27 @@ type InvoiceInput struct {
 	Notes          string             `json:"notes"`
 	Terms          string             `json:"terms"`
 	Items          []InvoiceItemInput `json:"items"`
+}
+
+type WalkInServiceInput struct {
+	ServiceDate   string  `json:"serviceDate"`
+	FirstName     string  `json:"firstName"`
+	LastName      string  `json:"lastName"`
+	Phone         string  `json:"phone"`
+	Email         string  `json:"email"`
+	Device        string  `json:"device"`
+	Make          string  `json:"make"`
+	Model         string  `json:"model"`
+	SerialNumber  string  `json:"serialNumber"`
+	Issue         string  `json:"issue"`
+	Solution      string  `json:"solution"`
+	PartsCost     float64 `json:"partsCost"`
+	ServiceCharge float64 `json:"serviceCharge"`
+	AmountPaid    float64 `json:"amountPaid"`
+	PaymentMethod string  `json:"paymentMethod"`
+	PaymentDate   string  `json:"paymentDate"`
+	Reference     string  `json:"reference"`
+	Notes         string  `json:"notes"`
 }
 
 type InvoiceItem struct {

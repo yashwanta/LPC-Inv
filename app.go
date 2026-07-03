@@ -130,6 +130,20 @@ func (a *App) DeleteVendor(id int64) error {
 	return a.repo.DeleteVendor(a.ctx, id)
 }
 
+func (a *App) ListPurchases(search string) ([]repository.Purchase, error) {
+	if err := a.healthCheck(); err != nil {
+		return nil, err
+	}
+	return a.repo.ListPurchases(a.ctx, search)
+}
+
+func (a *App) SavePurchase(input repository.PurchaseInput) (*repository.Purchase, error) {
+	if err := a.healthCheck(); err != nil {
+		return nil, err
+	}
+	return a.repo.SavePurchase(a.ctx, input)
+}
+
 func (a *App) ListInvoices(search string) ([]repository.InvoiceListItem, error) {
 	if err := a.healthCheck(); err != nil {
 		return nil, err
@@ -142,6 +156,13 @@ func (a *App) CreateInvoice(input repository.InvoiceInput) (*repository.InvoiceD
 		return nil, err
 	}
 	return a.repo.CreateInvoice(a.ctx, input)
+}
+
+func (a *App) RecordWalkInService(input repository.WalkInServiceInput) (*repository.InvoiceDetail, error) {
+	if err := a.healthCheck(); err != nil {
+		return nil, err
+	}
+	return a.repo.RecordWalkInService(a.ctx, input)
 }
 
 func (a *App) GetInvoice(id int64) (*repository.InvoiceDetail, error) {

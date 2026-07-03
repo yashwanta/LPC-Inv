@@ -21,14 +21,16 @@ import {
   Sun,
   UserPlus,
   Users,
-  WalletCards
+  WalletCards,
+  Wrench
 } from "lucide-react";
-import { api, AppSettings, AuthSession, Customer, CustomerLookup, DashboardSummary, IncomeExpensePeriod, IncomeExpenseReport, InvoiceInput, InvoiceItemInput, InvoiceListItem, Vendor } from "./api";
+import { api, AppSettings, AuthSession, Customer, CustomerLookup, DashboardSummary, IncomeExpensePeriod, IncomeExpenseReport, InvoiceInput, InvoiceItemInput, InvoiceListItem, Purchase, PurchaseInput, Vendor, WalkInServiceInput } from "./api";
 
-type Page = "dashboard" | "customers" | "customerLookup" | "invoices" | "payments" | "purchases" | "vendors" | "import" | "tax" | "reports" | "backup" | "settings";
+type Page = "dashboard" | "manual" | "customers" | "customerLookup" | "invoices" | "payments" | "purchases" | "vendors" | "import" | "tax" | "reports" | "backup" | "settings";
 
 const navItems: { id: Page; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
   { id: "dashboard", label: "Dashboard", icon: Home },
+  { id: "manual", label: "Manual Entry", icon: Wrench },
   { id: "customers", label: "Customers", icon: Users },
   { id: "customerLookup", label: "Customer Lookup", icon: UserPlus },
   { id: "invoices", label: "Invoices", icon: FileText },
@@ -116,6 +118,7 @@ function App() {
           </div>
         </header>
         {page === "dashboard" && <Dashboard />}
+        {page === "manual" && <ManualEntry />}
         {page === "customers" && <Customers />}
         {page === "customerLookup" && <CustomerLookupPage />}
         {page === "vendors" && <Vendors />}
@@ -193,6 +196,111 @@ function Dashboard() {
       <div className="twoColumn">
         <ListPanel title="Recent invoices" rows={recentInvoices.map((invoice) => `${invoice.invoiceNumber} · ${invoice.customerName} · ${money(invoice.totalAmount)}`)} />
         <ListPanel title="Recent customers" rows={recentCustomers.map((customer) => `${customer.fullName}${customer.companyName ? ` · ${customer.companyName}` : ""}`)} />
+      </div>
+    </section>
+  );
+}
+
+const emptyServiceEntry: WalkInServiceInput = {
+  serviceDate: today(),
+  firstName: "",
+  lastName: "",
+  phone: "",
+  email: "",
+  device: "",
+  make: "",
+  model: "",
+  serialNumber: "",
+  issue: "",
+  solution: "",
+  partsCost: 0,
+  serviceCharge: 150,
+  amountPaid: 150,
+  paymentMethod: "cash",
+  paymentDate: today(),
+  reference: "",
+  notes: ""
+};
+
+const emptyPurchaseEntry: PurchaseInput = {
+  purchaseDate: today(),
+  vendorName: "",
+  description: "",
+  categoryName: "Computer parts",
+  amount: 0,
+  taxPaid: 0,
+  paymentMethod: "card",
+  notes: ""
+};
+
+function ManualEntry() {
+  const [service, setService] = useState<WalkInServiceInput>(emptyServiceEntry);
+  const [purchase, setPurchase] = useState<PurchaseInput>(emptyPurchaseEntry);
+  const [recentInvoices, setRecentInvoices] = useState<InvoiceListItem[]>([]);
+  const [recentPurchases, setRecentPurchases] = useState<Purchase[]>([]);
+  const [message, setMessage] = useState("");
+
+  async function load() {
+    const [invoiceRows, purchaseRows] = await Promise.all([api.listInvoices(""), api.listPurchases("")]);
+    setRecentInvoices(invoiceRows.slice(0, 6));
+    setRecentPurchases(purchaseRows.slice(0, 6));
+  }
+
+  useEffect(() => { load().catch((err) => setMessage(String(err))); }, []);
+
+  const serviceTotal = service.partsCost + service.serviceCharge;
+
+  async function saveService(event: React.FormEvent) {
+    event.preventDefault();
+    await api.recordWalkInService(service);
+    setService({ ...emptyServiceEntry, serviceDate: today(), paymentDate: today() });
+    setMessage("Walk-in service income saved");
+    await load();
+  }
+
+  async function savePurchase(event: React.FormEvent) {
+    event.preventDefault();
+    await api.savePurchase(purchase);
+    setPurchase({ ...emptyPurchaseEntry, purchaseDate: today() });
+    setMessage("Expense saved");
+    await load();
+  }
+
+  return (
+    <section className="manualEntryGrid">
+      <form className="formPanel" onSubmit={saveService}>
+        <PanelTitle icon={Wrench} title="Walk-in service income" />
+        <div className="fieldRow"><Input label="Service date" type="date" value={service.serviceDate} onChange={(serviceDate) => setService({ ...service, serviceDate })} /><Input label="Payment date" type="date" value={service.paymentDate} onChange={(paymentDate) => setService({ ...service, paymentDate })} /></div>
+        <div className="fieldRow"><Input label="First name" value={service.firstName} onChange={(firstName) => setService({ ...service, firstName })} /><Input label="Last name" value={service.lastName} onChange={(lastName) => setService({ ...service, lastName })} /></div>
+        <div className="fieldRow"><Input label="Phone" value={service.phone} onChange={(phone) => setService({ ...service, phone })} /><Input label="Email" value={service.email} onChange={(email) => setService({ ...service, email })} /></div>
+        <div className="fieldRow"><Input label="Device" value={service.device} onChange={(device) => setService({ ...service, device })} /><Input label="Make" value={service.make} onChange={(make) => setService({ ...service, make })} /></div>
+        <div className="fieldRow"><Input label="Model" value={service.model} onChange={(model) => setService({ ...service, model })} /><Input label="Serial number" value={service.serialNumber} onChange={(serialNumber) => setService({ ...service, serialNumber })} /></div>
+        <TextArea label="Issue" value={service.issue} onChange={(issue) => setService({ ...service, issue })} />
+        <TextArea label="Solution" value={service.solution} onChange={(solution) => setService({ ...service, solution })} />
+        <div className="fieldRow"><Input label="Parts cost" type="number" value={String(service.partsCost)} onChange={(partsCost) => setService({ ...service, partsCost: Number(partsCost), amountPaid: Number(partsCost) + service.serviceCharge })} /><Input label="Service charge" type="number" value={String(service.serviceCharge)} onChange={(serviceCharge) => setService({ ...service, serviceCharge: Number(serviceCharge), amountPaid: Number(serviceCharge) + service.partsCost })} /></div>
+        <div className="fieldRow"><Input label="Amount paid" type="number" value={String(service.amountPaid)} onChange={(amountPaid) => setService({ ...service, amountPaid: Number(amountPaid) })} /><PaymentMethodSelect value={service.paymentMethod} onChange={(paymentMethod) => setService({ ...service, paymentMethod })} /></div>
+        <Input label="Reference" value={service.reference} onChange={(reference) => setService({ ...service, reference })} />
+        <TextArea label="Notes" value={service.notes} onChange={(notes) => setService({ ...service, notes })} />
+        <div className="invoiceTotal"><span>Total income</span><strong>{money(serviceTotal)}</strong></div>
+        <button className="primaryButton"><Plus size={16} /> Save service income</button>
+      </form>
+
+      <div className="contentStack">
+        <form className="formPanel" onSubmit={savePurchase}>
+          <PanelTitle icon={PackageOpen} title="Manual expense" />
+          <Input label="Purchase date" type="date" value={purchase.purchaseDate} onChange={(purchaseDate) => setPurchase({ ...purchase, purchaseDate })} />
+          <Input label="Vendor" value={purchase.vendorName} onChange={(vendorName) => setPurchase({ ...purchase, vendorName })} />
+          <TextArea label="Description" value={purchase.description} onChange={(description) => setPurchase({ ...purchase, description })} />
+          <div className="fieldRow"><CategorySelect value={purchase.categoryName} onChange={(categoryName) => setPurchase({ ...purchase, categoryName })} /><PaymentMethodSelect value={purchase.paymentMethod} onChange={(paymentMethod) => setPurchase({ ...purchase, paymentMethod })} /></div>
+          <div className="fieldRow"><Input label="Amount" type="number" value={String(purchase.amount)} onChange={(amount) => setPurchase({ ...purchase, amount: Number(amount) })} /><Input label="Tax paid" type="number" value={String(purchase.taxPaid)} onChange={(taxPaid) => setPurchase({ ...purchase, taxPaid: Number(taxPaid) })} /></div>
+          <TextArea label="Notes" value={purchase.notes} onChange={(notes) => setPurchase({ ...purchase, notes })} />
+          <button className="primaryButton"><Plus size={16} /> Save expense</button>
+        </form>
+        {message && <div className="notice">{message}</div>}
+        <div className="twoColumn manualRecent">
+          <ListPanel title="Recent service income" rows={recentInvoices.map((invoice) => `${invoice.invoiceDate} · ${invoice.customerName} · ${money(invoice.totalAmount)} · ${invoice.status}`)} />
+          <ListPanel title="Recent expenses" rows={recentPurchases.map((row) => `${row.purchaseDate} · ${row.vendorName || "No vendor"} · ${money(row.amount)} · ${row.categoryName}`)} />
+        </div>
       </div>
     </section>
   );
@@ -556,6 +664,12 @@ function Placeholder({ title, items }: { title: string; items: string[] }) { ret
 function SearchBox({ value, onChange, onSearch }: { value: string; onChange: (value: string) => void; onSearch: () => void }) { return <div className="searchBox"><Search size={16} /><input value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onSearch(); }} placeholder="Search" /><button className="ghostButton" onClick={onSearch}>Search</button></div>; }
 function Input({ label, value, onChange, type = "text", required = false }: { label: string; value?: string; onChange: (value: string) => void; type?: string; required?: boolean }) { return <label>{label}<input type={type} value={value ?? ""} onChange={(e) => onChange(e.target.value)} required={required} /></label>; }
 function TextArea({ label, value, onChange }: { label: string; value?: string; onChange: (value: string) => void }) { return <label>{label}<textarea value={value ?? ""} onChange={(e) => onChange(e.target.value)} /></label>; }
+function PaymentMethodSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return <label>Payment method<select value={value} onChange={(e) => onChange(e.target.value)}><option value="cash">Cash</option><option value="card">Card</option><option value="check">Check</option><option value="zelle">Zelle</option><option value="other">Other</option></select></label>;
+}
+function CategorySelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return <label>Category<select value={value} onChange={(e) => onChange(e.target.value)}><option>Computer parts</option><option>Tools</option><option>Software</option><option>Shipping</option><option>Office supplies</option><option>Repair supplies</option><option>Advertising</option><option>Bank fees</option><option>Fuel / travel</option><option>Uncategorized</option></select></label>;
+}
 
 export default App;
 

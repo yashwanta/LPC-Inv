@@ -157,6 +157,79 @@ func (r *Repository) DeleteVendor(ctx context.Context, id int64) error {
 	return err
 }
 
+func (r *Repository) ListPurchases(ctx context.Context, search string) ([]Purchase, error) {
+	search = strings.TrimSpace(search)
+	rows, err := r.db.QueryContext(ctx, `
+		select p.id, coalesce(v.id, 0), coalesce(v.vendor_name, ''), p.purchase_date::text, p.description, coalesce(pc.name, ''), p.amount, p.tax_paid, p.payment_method, p.notes, p.created_at::text
+		from purchases p
+		left join vendors v on v.id = p.vendor_id
+		left join purchase_categories pc on pc.id = p.category_id
+		where $1 = '' or p.description ilike '%' || $1 || '%' or coalesce(v.vendor_name, '') ilike '%' || $1 || '%' or coalesce(pc.name, '') ilike '%' || $1 || '%'
+		order by p.purchase_date desc, p.created_at desc
+		limit 200
+	`, search)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	purchases := []Purchase{}
+	for rows.Next() {
+		var purchase Purchase
+		if err := rows.Scan(&purchase.ID, &purchase.VendorID, &purchase.VendorName, &purchase.PurchaseDate, &purchase.Description, &purchase.CategoryName, &purchase.Amount, &purchase.TaxPaid, &purchase.PaymentMethod, &purchase.Notes, &purchase.CreatedAt); err != nil {
+			return nil, err
+		}
+		purchases = append(purchases, purchase)
+	}
+	return purchases, rows.Err()
+}
+
+func (r *Repository) SavePurchase(ctx context.Context, input PurchaseInput) (*Purchase, error) {
+	purchaseDate, err := parseDate(input.PurchaseDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid purchase date")
+	}
+	input.Description = strings.TrimSpace(input.Description)
+	if input.Description == "" {
+		return nil, fmt.Errorf("purchase description is required")
+	}
+	input.Amount = roundMoney(input.Amount)
+	if input.Amount <= 0 {
+		return nil, fmt.Errorf("purchase amount must be greater than zero")
+	}
+	input.TaxPaid = math.Max(0, roundMoney(input.TaxPaid))
+	categoryName := fallback(strings.TrimSpace(input.CategoryName), "Uncategorized")
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	vendorID, err := ensureVendor(ctx, tx, input.VendorName)
+	if err != nil {
+		return nil, err
+	}
+	categoryID, err := ensurePurchaseCategory(ctx, tx, categoryName)
+	if err != nil {
+		return nil, err
+	}
+
+	var purchaseID int64
+	err = tx.QueryRowContext(ctx, `
+		insert into purchases(vendor_id, purchase_date, description, category_id, amount, tax_paid, payment_method, notes)
+		values($1,$2,$3,$4,$5,$6,$7,$8)
+		returning id
+	`, nullInt64(vendorID), purchaseDate, input.Description, categoryID, input.Amount, input.TaxPaid, strings.TrimSpace(input.PaymentMethod), strings.TrimSpace(input.Notes)).Scan(&purchaseID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.getPurchase(ctx, purchaseID)
+}
+
 func (r *Repository) CreateInvoice(ctx context.Context, input InvoiceInput) (*InvoiceDetail, error) {
 	if input.CustomerID == 0 {
 		return nil, fmt.Errorf("customer is required")
@@ -242,6 +315,120 @@ func (r *Repository) CreateInvoice(ctx context.Context, input InvoiceInput) (*In
 			values($1,$2,$3,$4,$5,$6,$7,$8)
 		`, invoiceID, itemType, item.Description, item.Quantity, item.UnitPrice, item.Taxable, lineTotal, position)
 		if err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.GetInvoice(ctx, invoiceID)
+}
+
+func (r *Repository) RecordWalkInService(ctx context.Context, input WalkInServiceInput) (*InvoiceDetail, error) {
+	serviceDate, err := parseDate(input.ServiceDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid service date")
+	}
+	paymentDate, err := parseDate(fallback(input.PaymentDate, input.ServiceDate))
+	if err != nil {
+		return nil, fmt.Errorf("invalid payment date")
+	}
+
+	serviceCharge := math.Max(0, roundMoney(input.ServiceCharge))
+	partsCost := math.Max(0, roundMoney(input.PartsCost))
+	if serviceCharge == 0 && partsCost == 0 {
+		return nil, fmt.Errorf("service charge or parts cost is required")
+	}
+
+	fullName := strings.TrimSpace(strings.TrimSpace(input.FirstName) + " " + strings.TrimSpace(input.LastName))
+	if fullName == "" {
+		fullName = "Walk-in Customer"
+	}
+	description := buildServiceDescription(input)
+
+	settings, err := r.GetSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	customerID, err := ensureCustomer(ctx, tx, CustomerInput{
+		FullName: fullName,
+		Email:    strings.TrimSpace(input.Email),
+		Phone:    strings.TrimSpace(input.Phone),
+		Notes:    "Created from manual walk-in service entry.",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var taxableSubtotal float64
+	if settings.PartsTaxable {
+		taxableSubtotal += partsCost
+	}
+	if settings.LaborTaxable {
+		taxableSubtotal += serviceCharge
+	}
+	tax := roundMoney(taxableSubtotal * settings.DefaultTaxRate)
+	subtotal := roundMoney(partsCost + serviceCharge)
+	total := roundMoney(subtotal + tax)
+
+	var sequence int64
+	if err := tx.QueryRowContext(ctx, `select nextval('invoice_number_seq')`).Scan(&sequence); err != nil {
+		return nil, err
+	}
+	invoiceNumber := fmt.Sprintf("%s-%06d", settings.InvoicePrefix, sequence)
+	notes := buildServiceNotes(input)
+
+	var invoiceID int64
+	err = tx.QueryRowContext(ctx, `
+		insert into invoices(invoice_number, invoice_date, due_date, customer_id, subtotal, tax_amount, total_amount, notes, terms)
+		values($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		returning id
+	`, invoiceNumber, serviceDate, serviceDate, customerID, subtotal, tax, total, notes, fallback(settings.InvoiceTerms, "Payment due on receipt.")).Scan(&invoiceID)
+	if err != nil {
+		return nil, err
+	}
+
+	position := 0
+	if serviceCharge > 0 {
+		if _, err := tx.ExecContext(ctx, `
+			insert into invoice_items(invoice_id, item_type, description, quantity, unit_price, taxable, line_total, position)
+			values($1,'labor',$2,1,$3,$4,$3,$5)
+		`, invoiceID, fallback(description, "Walk-in service charge"), serviceCharge, settings.LaborTaxable, position); err != nil {
+			return nil, err
+		}
+		position++
+	}
+	if partsCost > 0 {
+		if _, err := tx.ExecContext(ctx, `
+			insert into invoice_items(invoice_id, item_type, description, quantity, unit_price, taxable, line_total, position)
+			values($1,'parts',$2,1,$3,$4,$3,$5)
+		`, invoiceID, fallback(input.Solution, "Parts"), partsCost, settings.PartsTaxable, position); err != nil {
+			return nil, err
+		}
+	}
+
+	amountPaid := math.Min(total, math.Max(0, roundMoney(input.AmountPaid)))
+	if amountPaid > 0 {
+		method := normalizePaymentMethod(input.PaymentMethod)
+		if _, err := tx.ExecContext(ctx, `
+			insert into payments(invoice_id, payment_date, amount, method, notes)
+			values($1,$2,$3,$4,$5)
+		`, invoiceID, paymentDate, amountPaid, method, "Manual walk-in payment"); err != nil {
+			return nil, err
+		}
+		status := "partial"
+		if amountPaid >= total {
+			status = "paid"
+		}
+		if _, err := tx.ExecContext(ctx, `update invoices set paid_amount=$1, status=$2, updated_at=now() where id=$3`, amountPaid, status, invoiceID); err != nil {
 			return nil, err
 		}
 	}
@@ -568,6 +755,136 @@ func (r *Repository) getCustomer(ctx context.Context, id int64) (*Customer, erro
 		return nil, err
 	}
 	return &c, nil
+}
+
+func (r *Repository) getPurchase(ctx context.Context, id int64) (*Purchase, error) {
+	var purchase Purchase
+	err := r.db.QueryRowContext(ctx, `
+		select p.id, coalesce(v.id, 0), coalesce(v.vendor_name, ''), p.purchase_date::text, p.description, coalesce(pc.name, ''), p.amount, p.tax_paid, p.payment_method, p.notes, p.created_at::text
+		from purchases p
+		left join vendors v on v.id = p.vendor_id
+		left join purchase_categories pc on pc.id = p.category_id
+		where p.id=$1
+	`, id).Scan(&purchase.ID, &purchase.VendorID, &purchase.VendorName, &purchase.PurchaseDate, &purchase.Description, &purchase.CategoryName, &purchase.Amount, &purchase.TaxPaid, &purchase.PaymentMethod, &purchase.Notes, &purchase.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &purchase, nil
+}
+
+func ensureCustomer(ctx context.Context, tx *sql.Tx, input CustomerInput) (int64, error) {
+	fullName := strings.TrimSpace(input.FullName)
+	phone := strings.TrimSpace(input.Phone)
+	email := strings.TrimSpace(input.Email)
+	var id int64
+	err := tx.QueryRowContext(ctx, `
+		select id
+		from customers
+		where lower(full_name) = lower($1)
+			and ($2 = '' or phone = $2)
+			and ($3 = '' or lower(email) = lower($3))
+		order by updated_at desc
+		limit 1
+	`, fullName, phone, email).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+	err = tx.QueryRowContext(ctx, `
+		insert into customers(full_name, email, phone, notes)
+		values($1,$2,$3,$4)
+		returning id
+	`, fullName, email, phone, strings.TrimSpace(input.Notes)).Scan(&id)
+	return id, err
+}
+
+func ensureVendor(ctx context.Context, tx *sql.Tx, vendorName string) (int64, error) {
+	vendorName = strings.TrimSpace(vendorName)
+	if vendorName == "" {
+		return 0, nil
+	}
+	var id int64
+	err := tx.QueryRowContext(ctx, `select id from vendors where lower(vendor_name) = lower($1) limit 1`, vendorName).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+	err = tx.QueryRowContext(ctx, `insert into vendors(vendor_name) values($1) returning id`, vendorName).Scan(&id)
+	return id, err
+}
+
+func ensurePurchaseCategory(ctx context.Context, tx *sql.Tx, categoryName string) (int64, error) {
+	categoryName = fallback(strings.TrimSpace(categoryName), "Uncategorized")
+	var id int64
+	err := tx.QueryRowContext(ctx, `select id from purchase_categories where lower(name) = lower($1) limit 1`, categoryName).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+	err = tx.QueryRowContext(ctx, `insert into purchase_categories(name) values($1) returning id`, categoryName).Scan(&id)
+	return id, err
+}
+
+func buildServiceDescription(input WalkInServiceInput) string {
+	parts := []string{}
+	device := strings.TrimSpace(strings.Join([]string{input.Device, input.Make, input.Model}, " "))
+	if device != "" {
+		parts = append(parts, device)
+	}
+	if strings.TrimSpace(input.Issue) != "" {
+		parts = append(parts, "Issue: "+strings.TrimSpace(input.Issue))
+	}
+	if strings.TrimSpace(input.Solution) != "" {
+		parts = append(parts, "Solution: "+strings.TrimSpace(input.Solution))
+	}
+	return strings.Join(parts, " | ")
+}
+
+func buildServiceNotes(input WalkInServiceInput) string {
+	parts := []string{}
+	for _, item := range []struct {
+		label string
+		value string
+	}{
+		{"Device", strings.TrimSpace(input.Device)},
+		{"Make", strings.TrimSpace(input.Make)},
+		{"Model", strings.TrimSpace(input.Model)},
+		{"Serial", strings.TrimSpace(input.SerialNumber)},
+		{"Issue", strings.TrimSpace(input.Issue)},
+		{"Solution", strings.TrimSpace(input.Solution)},
+		{"Reference", strings.TrimSpace(input.Reference)},
+		{"Notes", strings.TrimSpace(input.Notes)},
+	} {
+		if item.value != "" {
+			parts = append(parts, item.label+": "+item.value)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func normalizePaymentMethod(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "cash":
+		return "cash"
+	case "card", "credit", "credit card", "debit", "debit card":
+		return "card"
+	case "check", "cheque":
+		return "check"
+	case "zelle":
+		return "zelle"
+	default:
+		return "other"
+	}
+}
+
+func nullInt64(value int64) sql.NullInt64 {
+	return sql.NullInt64{Int64: value, Valid: value != 0}
 }
 
 func parseDate(value string) (time.Time, error) {

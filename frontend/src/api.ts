@@ -37,6 +37,31 @@ export type Vendor = {
   notes: string;
 };
 
+export type Purchase = {
+  id: number;
+  vendorId: number;
+  vendorName: string;
+  purchaseDate: string;
+  description: string;
+  categoryName: string;
+  amount: number;
+  taxPaid: number;
+  paymentMethod: string;
+  notes: string;
+  createdAt: string;
+};
+
+export type PurchaseInput = {
+  purchaseDate: string;
+  vendorName: string;
+  description: string;
+  categoryName: string;
+  amount: number;
+  taxPaid: number;
+  paymentMethod: string;
+  notes: string;
+};
+
 export type InvoiceListItem = {
   id: number;
   invoiceNumber: string;
@@ -64,6 +89,27 @@ export type InvoiceInput = {
   notes: string;
   terms: string;
   items: InvoiceItemInput[];
+};
+
+export type WalkInServiceInput = {
+  serviceDate: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  device: string;
+  make: string;
+  model: string;
+  serialNumber: string;
+  issue: string;
+  solution: string;
+  partsCost: number;
+  serviceCharge: number;
+  amountPaid: number;
+  paymentMethod: string;
+  paymentDate: string;
+  reference: string;
+  notes: string;
 };
 
 export type AppSettings = {
@@ -133,6 +179,7 @@ type WailsWindow = Window & {
 let demoCustomerId = 4;
 let demoVendorId = 3;
 let demoInvoiceId = 4;
+let demoPurchaseId = 3;
 
 let demoSettings: AppSettings = {
   businessName: "SimpleTech Books",
@@ -200,6 +247,11 @@ let demoInvoices: InvoiceListItem[] = [
   { id: 1, invoiceNumber: "INV-001001", invoiceDate: "2026-06-10", dueDate: "2026-06-24", customerName: "Jordan Lee", status: "unpaid", totalAmount: 189.2, paidAmount: 0 },
   { id: 2, invoiceNumber: "INV-001002", invoiceDate: "2026-06-20", dueDate: "2026-07-04", customerName: "Walk-in Customer", status: "paid", totalAmount: 95, paidAmount: 95 },
   { id: 3, invoiceNumber: "INV-001003", invoiceDate: "2026-06-22", dueDate: "2026-07-06", customerName: "Jordan Lee", status: "paid", totalAmount: 255.8, paidAmount: 255.8 }
+];
+
+let demoPurchases: Purchase[] = [
+  { id: 1, vendorId: 1, vendorName: "Amazon Business", purchaseDate: "2026-06-14", description: "Replacement SSD", categoryName: "Computer parts", amount: 72.49, taxPaid: 0, paymentMethod: "card", notes: "", createdAt: "2026-06-14" },
+  { id: 2, vendorId: 2, vendorName: "Dell", purchaseDate: "2026-06-18", description: "Laptop screen", categoryName: "Computer parts", amount: 119.95, taxPaid: 0, paymentMethod: "card", notes: "", createdAt: "2026-06-18" }
 ];
 
 function inDemoMode() {
@@ -295,6 +347,29 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
       const search = String(args[0] || "");
       return demoInvoices.filter((row) => !search || filterText(`${row.invoiceNumber} ${row.customerName}`, search)) as T;
     }
+    case "ListPurchases": {
+      const search = String(args[0] || "");
+      return demoPurchases.filter((row) => !search || filterText(`${row.vendorName} ${row.description} ${row.categoryName}`, search)) as T;
+    }
+    case "SavePurchase": {
+      const input = args[0] as PurchaseInput;
+      const vendor = demoVendors.find((row) => row.vendorName.toLowerCase() === input.vendorName.toLowerCase());
+      const saved: Purchase = {
+        id: demoPurchaseId++,
+        vendorId: vendor?.id || 0,
+        vendorName: input.vendorName,
+        purchaseDate: input.purchaseDate,
+        description: input.description,
+        categoryName: input.categoryName || "Uncategorized",
+        amount: input.amount,
+        taxPaid: input.taxPaid,
+        paymentMethod: input.paymentMethod,
+        notes: input.notes,
+        createdAt: input.purchaseDate
+      };
+      demoPurchases = [saved, ...demoPurchases];
+      return saved as T;
+    }
     case "CreateInvoice": {
       const input = args[0] as InvoiceInput;
       const customer = demoCustomers.find((row) => row.id === input.customerId);
@@ -308,6 +383,24 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
         status: "unpaid",
         totalAmount: Math.round((subtotal - input.discountAmount) * 100) / 100,
         paidAmount: 0
+      };
+      demoInvoices = [saved, ...demoInvoices];
+      return saved as T;
+    }
+    case "RecordWalkInService": {
+      const input = args[0] as WalkInServiceInput;
+      const customerName = `${input.firstName} ${input.lastName}`.trim() || "Walk-in Customer";
+      const totalAmount = Math.round((input.partsCost + input.serviceCharge) * 100) / 100;
+      const paidAmount = Math.min(totalAmount, input.amountPaid);
+      const saved: InvoiceListItem = {
+        id: demoInvoiceId++,
+        invoiceNumber: `${demoSettings.invoicePrefix}-00${1000 + demoInvoiceId}`,
+        invoiceDate: input.serviceDate,
+        dueDate: input.serviceDate,
+        customerName,
+        status: paidAmount >= totalAmount ? "paid" : paidAmount > 0 ? "partial" : "unpaid",
+        totalAmount,
+        paidAmount
       };
       demoInvoices = [saved, ...demoInvoices];
       return saved as T;
@@ -353,8 +446,11 @@ export const api = {
   listVendors: (search = "") => call<Vendor[]>("ListVendors", search),
   saveVendor: (vendor: Partial<Vendor>) => call<Vendor>("SaveVendor", vendor),
   deleteVendor: (id: number) => call<void>("DeleteVendor", id),
+  listPurchases: (search = "") => call<Purchase[]>("ListPurchases", search),
+  savePurchase: (purchase: PurchaseInput) => call<Purchase>("SavePurchase", purchase),
   listInvoices: (search = "") => call<InvoiceListItem[]>("ListInvoices", search),
   createInvoice: (invoice: InvoiceInput) => call<unknown>("CreateInvoice", invoice),
+  recordWalkInService: (entry: WalkInServiceInput) => call<unknown>("RecordWalkInService", entry),
   exportInvoicePDF: (id: number) => call<string>("ExportInvoicePDF", id),
   getSettings: () => call<AppSettings>("GetSettings"),
   saveSettings: (settings: AppSettings) => call<AppSettings>("SaveSettings", settings),
