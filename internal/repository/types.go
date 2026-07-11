@@ -1,5 +1,7 @@
 package repository
 
+import "time"
+
 type User struct {
 	ID           int64  `json:"id"`
 	Username     string `json:"username"`
@@ -21,11 +23,12 @@ type UserInput struct {
 }
 
 type AuthSession struct {
-	UserID      int64  `json:"userId"`
-	Username    string `json:"username"`
-	DisplayName string `json:"displayName"`
-	Role        string `json:"role"`
-	Token       string `json:"token"`
+	UserID       int64     `json:"userId"`
+	Username     string    `json:"username"`
+	DisplayName  string    `json:"displayName"`
+	Role         string    `json:"role"`
+	Token        string    `json:"token"`
+	LastActivity time.Time `json:"-"`
 }
 
 type Customer struct {

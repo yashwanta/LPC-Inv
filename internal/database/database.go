@@ -17,7 +17,7 @@ import (
 func Open(ctx context.Context, migrations fs.FS) (*sql.DB, error) {
 	dsn := os.Getenv("SIMPLETECH_DATABASE_URL")
 	if strings.TrimSpace(dsn) == "" {
-		dsn = "postgres://postgres:postgres@localhost:5432/simpletech_books?sslmode=disable"
+		return nil, fmt.Errorf("SIMPLETECH_DATABASE_URL is required")
 	}
 	if migrations == nil {
 		migrations = os.DirFS(".")

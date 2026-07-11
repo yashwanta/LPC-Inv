@@ -2,12 +2,20 @@ package repository
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
+	"io"
+	"log"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"simpletech-books/internal/security"
 )
@@ -81,13 +89,16 @@ func (r *Repository) SaveUser(ctx context.Context, input UserInput) (*User, erro
 		input.DisplayName = input.Username
 	}
 	role := strings.ToLower(strings.TrimSpace(input.Role))
-	if role != "standard" {
-		role = "admin"
+	if role != "standard" && role != "admin" {
+		return nil, fmt.Errorf("invalid role: must be admin or standard")
 	}
 	accessLabel := fallback(input.AccessLabel, "Full Access")
 	if input.ID == 0 {
 		if strings.TrimSpace(input.Password) == "" {
 			return nil, fmt.Errorf("password is required")
+		}
+		if utf8.RuneCountInString(input.Password) < 10 {
+			return nil, fmt.Errorf("password must be at least 10 characters")
 		}
 		hash, err := security.HashPassword(input.Password)
 		if err != nil {
@@ -103,6 +114,9 @@ func (r *Repository) SaveUser(ctx context.Context, input UserInput) (*User, erro
 	}
 
 	if strings.TrimSpace(input.Password) != "" {
+		if utf8.RuneCountInString(input.Password) < 10 {
+			return nil, fmt.Errorf("password must be at least 10 characters")
+		}
 		hash, err := security.HashPassword(input.Password)
 		if err != nil {
 			return nil, err
@@ -739,6 +753,10 @@ func (r *Repository) ListCustomerLookup(ctx context.Context, search string, kind
 }
 
 func (r *Repository) SaveSettings(ctx context.Context, input AppSettings) (*AppSettings, error) {
+	smtpPassword, err := encryptSetting(input.SMTPPassword)
+	if err != nil {
+		return nil, err
+	}
 	values := map[string]string{
 		"business_name":      input.BusinessName,
 		"business_address":   input.BusinessAddress,
@@ -754,7 +772,7 @@ func (r *Repository) SaveSettings(ctx context.Context, input AppSettings) (*AppS
 		"smtp_host":          input.SMTPHost,
 		"smtp_port":          strconv.Itoa(input.SMTPPort),
 		"smtp_username":      input.SMTPUsername,
-		"smtp_password":      input.SMTPPassword,
+		"smtp_password":      smtpPassword,
 		"smtp_from_email":    input.SMTPFromEmail,
 		"smtp_from_name":     input.SMTPFromName,
 		"smtp_use_tls":       strconv.FormatBool(input.SMTPUseTLS),
@@ -786,6 +804,10 @@ func (r *Repository) GetSettings(ctx context.Context) (*AppSettings, error) {
 		}
 		values[key] = value
 	}
+	smtpPassword, err := decryptSetting(values["smtp_password"])
+	if err != nil {
+		return nil, err
+	}
 	settings := &AppSettings{
 		BusinessName:     fallback(values["business_name"], "SimpleTech Books"),
 		BusinessAddress:  values["business_address"],
@@ -801,12 +823,82 @@ func (r *Repository) GetSettings(ctx context.Context) (*AppSettings, error) {
 		SMTPHost:         values["smtp_host"],
 		SMTPPort:         parseInt(values["smtp_port"], 587),
 		SMTPUsername:     values["smtp_username"],
-		SMTPPassword:     values["smtp_password"],
+		SMTPPassword:     smtpPassword,
 		SMTPFromEmail:    values["smtp_from_email"],
 		SMTPFromName:     values["smtp_from_name"],
 		SMTPUseTLS:       parseBool(values["smtp_use_tls"], true),
 	}
 	return settings, rows.Err()
+}
+
+const encryptedSettingPrefix = "aesgcm:"
+
+func secretKey() ([]byte, error) {
+	encoded := strings.TrimSpace(os.Getenv("SIMPLETECH_SECRET_KEY"))
+	if encoded == "" {
+		log.Printf("WARNING: SIMPLETECH_SECRET_KEY is not set; SMTP password will be stored as plaintext")
+		return nil, nil
+	}
+	key, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(key) != 32 {
+		return nil, fmt.Errorf("SIMPLETECH_SECRET_KEY must be a base64-encoded 32-byte key")
+	}
+	return key, nil
+}
+
+func encryptSetting(value string) (string, error) {
+	key, err := secretKey()
+	if err != nil || key == nil || value == "" || strings.HasPrefix(value, encryptedSettingPrefix) {
+		return value, err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(value), nil)
+	return encryptedSettingPrefix + base64.RawStdEncoding.EncodeToString(sealed), nil
+}
+
+func decryptSetting(value string) (string, error) {
+	if !strings.HasPrefix(value, encryptedSettingPrefix) {
+		return value, nil
+	}
+	key, err := secretKey()
+	if err != nil {
+		return "", err
+	}
+	if key == nil {
+		log.Printf("WARNING: encrypted SMTP password cannot be decrypted without SIMPLETECH_SECRET_KEY")
+		return value, nil
+	}
+	payload, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(value, encryptedSettingPrefix))
+	if err != nil {
+		return "", fmt.Errorf("decode SMTP password: %w", err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(payload) < gcm.NonceSize() {
+		return "", fmt.Errorf("invalid encrypted SMTP password")
+	}
+	plain, err := gcm.Open(nil, payload[:gcm.NonceSize()], payload[gcm.NonceSize():], nil)
+	if err != nil {
+		return "", fmt.Errorf("decrypt SMTP password: %w", err)
+	}
+	return string(plain), nil
 }
 
 func (r *Repository) GetDashboard(ctx context.Context) (*DashboardSummary, error) {

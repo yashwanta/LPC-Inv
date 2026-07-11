@@ -367,6 +367,8 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
   switch (method) {
     case "Login":
       return { userId: 1, username: String(args[0] || "admin"), displayName: "Browser Preview", role: "admin", token: "demo" } as T;
+    case "Logout":
+      return undefined as T;
     case "GetDashboard":
       return {
         totalUnpaidInvoices: demoInvoices.filter((row) => row.status !== "paid").reduce((sum, row) => sum + row.totalAmount - row.paidAmount, 0),
@@ -598,36 +600,45 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
   return fn(...args) as Promise<T>;
 }
 
+let sessionToken = "";
+
+async function authenticatedCall<T>(method: string, ...args: unknown[]): Promise<T> {
+	if (!sessionToken) throw new Error("Authentication required");
+	if (inDemoMode()) return call<T>(method, ...args);
+	return call<T>(method, sessionToken, ...args);
+}
+
 export const api = {
-  login: (username: string, password: string) => call<AuthSession>("Login", username, password),
-  dashboard: () => call<DashboardSummary>("GetDashboard"),
-  incomeExpenseReport: (period: IncomeExpensePeriod, year: number) => call<IncomeExpenseReport>("GetIncomeExpenseReport", period, year),
-  taxReport: (startDate: string, endDate: string, businessId = 0) => call<TaxReportSummary>("GetTaxReport", startDate, endDate, businessId),
-  listUsers: () => call<User[]>("ListUsers"),
-  saveUser: (user: UserInput) => call<User>("SaveUser", user),
-  listBusinesses: () => call<Business[]>("ListBusinesses"),
-  saveBusiness: (business: BusinessInput) => call<Business>("SaveBusiness", business),
-  listCustomers: (search = "") => call<Customer[]>("ListCustomers", search),
-  listCustomerLookup: (search = "", kind = "all") => call<CustomerLookup[]>("ListCustomerLookup", search, kind),
-  saveCustomer: (customer: Partial<Customer>) => call<Customer>("SaveCustomer", customer),
-  deleteCustomer: (id: number) => call<void>("DeleteCustomer", id),
-  listVendors: (search = "") => call<Vendor[]>("ListVendors", search),
-  saveVendor: (vendor: Partial<Vendor>) => call<Vendor>("SaveVendor", vendor),
-  deleteVendor: (id: number) => call<void>("DeleteVendor", id),
-  listPurchases: (search = "") => call<Purchase[]>("ListPurchases", search),
-  savePurchase: (purchase: PurchaseInput) => call<Purchase>("SavePurchase", purchase),
-  deletePurchase: (id: number) => call<void>("DeletePurchase", id),
-  listInvoices: (search = "") => call<InvoiceListItem[]>("ListInvoices", search),
-  getInvoice: (id: number) => call<InvoiceDetail>("GetInvoice", id),
-  createInvoice: (invoice: InvoiceInput) => call<unknown>("CreateInvoice", invoice),
-  recordWalkInService: (entry: WalkInServiceInput) => call<unknown>("RecordWalkInService", entry),
-  deleteInvoice: (id: number) => call<void>("DeleteInvoice", id),
-  exportInvoicePDF: (id: number) => call<string>("ExportInvoicePDF", id),
-  getSettings: () => call<AppSettings>("GetSettings"),
-  saveSettings: (settings: AppSettings) => call<AppSettings>("SaveSettings", settings),
-  selectBusinessLogo: () => call<string>("SelectBusinessLogo"),
-  getImageDataURL: (path: string) => call<string>("GetImageDataURL", path),
-  emailInvoice: (input: EmailInvoiceInput) => call<void>("EmailInvoice", input)
+  login: async (username: string, password: string) => { const session = await call<AuthSession>("Login", username, password); sessionToken = session.token; return session; },
+  logout: async () => { if (sessionToken) await authenticatedCall<void>("Logout"); sessionToken = ""; },
+  dashboard: () => authenticatedCall<DashboardSummary>("GetDashboard"),
+  incomeExpenseReport: (period: IncomeExpensePeriod, year: number) => authenticatedCall<IncomeExpenseReport>("GetIncomeExpenseReport", period, year),
+  taxReport: (startDate: string, endDate: string, businessId = 0) => authenticatedCall<TaxReportSummary>("GetTaxReport", startDate, endDate, businessId),
+  listUsers: () => authenticatedCall<User[]>("ListUsers"),
+  saveUser: (user: UserInput) => authenticatedCall<User>("SaveUser", user),
+  listBusinesses: () => authenticatedCall<Business[]>("ListBusinesses"),
+  saveBusiness: (business: BusinessInput) => authenticatedCall<Business>("SaveBusiness", business),
+  listCustomers: (search = "") => authenticatedCall<Customer[]>("ListCustomers", search),
+  listCustomerLookup: (search = "", kind = "all") => authenticatedCall<CustomerLookup[]>("ListCustomerLookup", search, kind),
+  saveCustomer: (customer: Partial<Customer>) => authenticatedCall<Customer>("SaveCustomer", customer),
+  deleteCustomer: (id: number) => authenticatedCall<void>("DeleteCustomer", id),
+  listVendors: (search = "") => authenticatedCall<Vendor[]>("ListVendors", search),
+  saveVendor: (vendor: Partial<Vendor>) => authenticatedCall<Vendor>("SaveVendor", vendor),
+  deleteVendor: (id: number) => authenticatedCall<void>("DeleteVendor", id),
+  listPurchases: (search = "") => authenticatedCall<Purchase[]>("ListPurchases", search),
+  savePurchase: (purchase: PurchaseInput) => authenticatedCall<Purchase>("SavePurchase", purchase),
+  deletePurchase: (id: number) => authenticatedCall<void>("DeletePurchase", id),
+  listInvoices: (search = "") => authenticatedCall<InvoiceListItem[]>("ListInvoices", search),
+  getInvoice: (id: number) => authenticatedCall<InvoiceDetail>("GetInvoice", id),
+  createInvoice: (invoice: InvoiceInput) => authenticatedCall<unknown>("CreateInvoice", invoice),
+  recordWalkInService: (entry: WalkInServiceInput) => authenticatedCall<unknown>("RecordWalkInService", entry),
+  deleteInvoice: (id: number) => authenticatedCall<void>("DeleteInvoice", id),
+  exportInvoicePDF: (id: number) => authenticatedCall<string>("ExportInvoicePDF", id),
+  getSettings: () => authenticatedCall<AppSettings>("GetSettings"),
+  saveSettings: (settings: AppSettings) => authenticatedCall<AppSettings>("SaveSettings", settings),
+  selectBusinessLogo: () => authenticatedCall<string>("SelectBusinessLogo"),
+  getImageDataURL: (path: string) => authenticatedCall<string>("GetImageDataURL", path),
+  emailInvoice: (input: EmailInvoiceInput) => authenticatedCall<void>("EmailInvoice", input)
 };
 
 
