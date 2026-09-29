@@ -13,6 +13,8 @@ export type User = {
   role: "admin" | "standard";
   accessLabel: string;
   active: boolean;
+  recoveryEmail: string;
+  securityQuestion: string;
 };
 
 export type UserInput = {
@@ -23,15 +25,28 @@ export type UserInput = {
   role: "admin" | "standard";
   accessLabel: string;
   active: boolean;
+  recoveryEmail: string;
+  securityQuestion: string;
+  securityAnswer: string;
+};
+
+export type PasswordRecoveryOptions = {
+  securityQuestion: string;
+  emailAvailable: boolean;
+  maskedEmail: string;
 };
 
 export type Business = {
+  paymentInstructions?: string;
+  checkPayableTo?: string;
   id: number;
   name: string;
   active: boolean;
 };
 
 export type BusinessInput = {
+  paymentInstructions?: string;
+  checkPayableTo?: string;
   id?: number;
   name: string;
   active: boolean;
@@ -152,6 +167,8 @@ export type WalkInServiceInput = {
 };
 
 export type InvoiceDetail = {
+  paymentInstructions?: string;
+  checkPayableTo?: string;
   id: number;
   businessId: number;
   businessName: string;
@@ -240,6 +257,64 @@ export type IncomeExpenseReport = {
   rows: IncomeExpenseReportItem[];
 };
 
+export type MonthlySummaryMonth = {
+  month: number;
+  label: string;
+  income: number;
+  collected: number;
+  expense: number;
+  invoiceCount: number;
+  customerCount: number;
+};
+
+export type MonthlySummaryCustomer = {
+  customerId: number;
+  fullName: string;
+  companyName: string;
+  phone: string;
+  email: string;
+  invoiceCount: number;
+  income: number;
+  collected: number;
+  firstVisit: string;
+  lastVisit: string;
+  possibleDuplicates: number;
+};
+
+export type MonthlySummaryEntry = InvoiceListItem & {
+  customerId: number;
+  possibleDuplicate: boolean;
+  itemCount: number;
+  walkInEntry: boolean;
+  paymentMethod: string;
+};
+
+export type MonthlySummary = {
+  year: number;
+  month: number;
+  businessId: number;
+  income: number;
+  collected: number;
+  outstanding: number;
+  expense: number;
+  net: number;
+  invoiceCount: number;
+  customerCount: number;
+  duplicateCount: number;
+  months: MonthlySummaryMonth[];
+  customers: MonthlySummaryCustomer[];
+  entries: MonthlySummaryEntry[];
+};
+
+/** Turns a Wails/Go error (often a plain string) into readable text. */
+export function errorText(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try { return JSON.stringify(err); } catch { return String(err); }
+}
+
+export const SESSION_EXPIRED_EVENT = "simpletech:session-expired";
+
 type WailsWindow = Window & {
   go?: {
     main?: {
@@ -277,7 +352,7 @@ let demoSettings: AppSettings = {
 };
 
 let demoUsers: User[] = [
-  { id: 1, username: "admin", displayName: "Administrator", role: "admin", accessLabel: "Full Access", active: true }
+  { id: 1, username: "admin", displayName: "Administrator", role: "admin", accessLabel: "Full Access", active: true, recoveryEmail: "a***@example.com", securityQuestion: "What city were you born in?" }
 ];
 
 let demoBusinesses: Business[] = [
@@ -362,12 +437,61 @@ function demoLookup(search: string, kind: string): CustomerLookup[] {
     .sort((a, b) => b.invoiceCount - a.invoiceCount || a.customer.fullName.localeCompare(b.customer.fullName));
 }
 
+function demoMonthlySummary(year: number, month: number, businessId: number): MonthlySummary {
+  const labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const scoped = demoInvoices.filter((row) => row.invoiceDate.startsWith(String(year)) && (!businessId || row.businessId === businessId));
+  const monthOf = (date: string) => Number(date.slice(5, 7));
+  const inPeriod = scoped.filter((row) => !month || monthOf(row.invoiceDate) === month);
+  const customerId = (name: string) => demoCustomers.find((row) => row.fullName === name)?.id || 0;
+  const entries: MonthlySummaryEntry[] = inPeriod.map((row) => ({
+    ...row,
+    customerId: customerId(row.customerName),
+    possibleDuplicate: inPeriod.filter((other) => other.customerName.toLowerCase() === row.customerName.toLowerCase() && other.invoiceDate === row.invoiceDate && other.totalAmount === row.totalAmount).length > 1,
+    itemCount: 1,
+    walkInEntry: true,
+    paymentMethod: row.paidAmount ? "Cash" : ""
+  }));
+  const byCustomer = new Map<string, MonthlySummaryCustomer>();
+  for (const row of entries) {
+    const customer = demoCustomers.find((item) => item.fullName === row.customerName);
+    const current = byCustomer.get(row.customerName) || { customerId: row.customerId, fullName: row.customerName, companyName: customer?.companyName || "", phone: customer?.phone || "", email: customer?.email || "", invoiceCount: 0, income: 0, collected: 0, firstVisit: row.invoiceDate, lastVisit: row.invoiceDate, possibleDuplicates: 0 };
+    current.invoiceCount += 1;
+    current.income += row.totalAmount;
+    current.collected += row.paidAmount;
+    if (row.invoiceDate < current.firstVisit) current.firstVisit = row.invoiceDate;
+    if (row.invoiceDate > current.lastVisit) current.lastVisit = row.invoiceDate;
+    byCustomer.set(row.customerName, current);
+  }
+  const expenseFor = (m: number) => demoPurchases.filter((row) => row.purchaseDate.startsWith(String(year)) && (!m || monthOf(row.purchaseDate) === m)).reduce((sum, row) => sum + row.amount, 0);
+  const income = entries.reduce((sum, row) => sum + row.totalAmount, 0);
+  const collected = entries.reduce((sum, row) => sum + row.paidAmount, 0);
+  const expense = expenseFor(month);
+  return {
+    year, month, businessId, income, collected, outstanding: income - collected, expense, net: income - expense,
+    invoiceCount: entries.length,
+    customerCount: byCustomer.size,
+    duplicateCount: entries.filter((row) => row.possibleDuplicate).length,
+    months: labels.map((label, index) => {
+      const rows = scoped.filter((row) => monthOf(row.invoiceDate) === index + 1);
+      return { month: index + 1, label, income: rows.reduce((sum, row) => sum + row.totalAmount, 0), collected: rows.reduce((sum, row) => sum + row.paidAmount, 0), expense: expenseFor(index + 1), invoiceCount: rows.length, customerCount: new Set(rows.map((row) => row.customerName)).size };
+    }),
+    customers: [...byCustomer.values()].sort((a, b) => b.income - a.income),
+    entries: entries.sort((a, b) => b.invoiceDate.localeCompare(a.invoiceDate) || b.id - a.id)
+  };
+}
+
 async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
   await new Promise((resolve) => window.setTimeout(resolve, 120));
   switch (method) {
     case "Login":
       return { userId: 1, username: String(args[0] || "admin"), displayName: "Browser Preview", role: "admin", token: "demo" } as T;
     case "Logout":
+      return undefined as T;
+    case "GetPasswordRecoveryOptions":
+      return { securityQuestion: "What city were you born in?", emailAvailable: true, maskedEmail: "a***@example.com" } as T;
+    case "RequestPasswordResetCode":
+    case "ResetPasswordWithCode":
+    case "ResetPasswordWithSecurityAnswer":
       return undefined as T;
     case "GetDashboard":
       return {
@@ -424,7 +548,7 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
       return demoUsers as T;
     case "SaveUser": {
       const input = args[0] as UserInput;
-      const saved: User = { id: input.id || demoUserId++, username: input.username, displayName: input.displayName, role: input.role, accessLabel: input.accessLabel, active: input.active };
+      const saved: User = { id: input.id || demoUserId++, username: input.username, displayName: input.displayName, role: input.role, accessLabel: input.accessLabel, active: input.active, recoveryEmail: input.recoveryEmail, securityQuestion: input.securityQuestion };
       demoUsers = input.id ? demoUsers.map((row) => row.id === input.id ? saved : row) : [saved, ...demoUsers];
       return saved as T;
     }
@@ -432,7 +556,7 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
       return demoBusinesses as T;
     case "SaveBusiness": {
       const input = args[0] as BusinessInput;
-      const saved: Business = { id: input.id || demoBusinessId++, name: input.name, active: input.active };
+      const saved: Business = { id: input.id || demoBusinessId++, name: input.name, active: input.active, paymentInstructions: input.paymentInstructions, checkPayableTo: input.checkPayableTo };
       demoBusinesses = input.id ? demoBusinesses.map((row) => row.id === input.id ? saved : row) : [saved, ...demoBusinesses];
       return saved as T;
     }
@@ -515,6 +639,8 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
         ...invoice,
         businessId: invoice.businessId,
         businessName: invoice.businessName,
+        paymentInstructions: demoBusinesses.find((row) => row.id === invoice.businessId)?.paymentInstructions,
+        checkPayableTo: demoBusinesses.find((row) => row.id === invoice.businessId)?.checkPayableTo,
         customer,
         subtotal: invoice.totalAmount,
         discountAmount: 0,
@@ -545,7 +671,8 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
         paidAmount: 0
       };
       demoInvoices = [saved, ...demoInvoices];
-      return saved as T;
+      const detail = await demoCall<InvoiceDetail>("GetInvoice", saved.id);
+      return { ...detail, customer, notes: input.notes, terms: input.terms, discountAmount: input.discountAmount, items: input.items.map((item, index) => ({ ...item, id: index + 1, position: index, lineTotal: item.quantity * item.unitPrice })) } as T;
     }
     case "RecordWalkInService": {
       const input = args[0] as WalkInServiceInput;
@@ -570,6 +697,16 @@ async function demoCall<T>(method: string, ...args: unknown[]): Promise<T> {
     case "DeleteInvoice":
       demoInvoices = demoInvoices.filter((row) => row.id !== Number(args[0]));
       return undefined as T;
+    case "MergeCustomers": {
+      const source = demoCustomers.find((row) => row.id === Number(args[0]));
+      const target = demoCustomers.find((row) => row.id === Number(args[1]));
+      if (!source || !target) throw new Error("customer not found");
+      demoInvoices = demoInvoices.map((row) => row.customerName === source.fullName ? { ...row, customerName: target.fullName } : row);
+      demoCustomers = demoCustomers.filter((row) => row.id !== source.id);
+      return target as T;
+    }
+    case "GetMonthlySummary":
+      return demoMonthlySummary(Number(args[0]), Number(args[1]), Number(args[2] || 0)) as T;
     case "ExportInvoicePDF":
       return "Browser preview: PDF export works in the Wails desktop app." as T;
     case "GetSettings":
@@ -603,14 +740,33 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
 let sessionToken = "";
 
 async function authenticatedCall<T>(method: string, ...args: unknown[]): Promise<T> {
-	if (!sessionToken) throw new Error("Authentication required");
-	if (inDemoMode()) return call<T>(method, ...args);
-	return call<T>(method, sessionToken, ...args);
+  if (!sessionToken) {
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    throw new Error("You are signed out. Please sign in again.");
+  }
+  try {
+    if (inDemoMode()) return await call<T>(method, ...args);
+    return await call<T>(method, sessionToken, ...args);
+  } catch (err) {
+    const text = errorText(err);
+    // The backend drops sessions after 30 minutes idle. Every save/edit/delete after
+    // that used to fail silently; now the user is sent back to the sign-in screen.
+    if (/session expired|invalid session|authentication required/i.test(text)) {
+      sessionToken = "";
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+      throw new Error("Your session expired. Please sign in again.");
+    }
+    throw new Error(text);
+  }
 }
 
 export const api = {
   login: async (username: string, password: string) => { const session = await call<AuthSession>("Login", username, password); sessionToken = session.token; return session; },
-  logout: async () => { if (sessionToken) await authenticatedCall<void>("Logout"); sessionToken = ""; },
+  passwordRecoveryOptions: (username: string) => call<PasswordRecoveryOptions>("GetPasswordRecoveryOptions", username),
+  requestPasswordResetCode: (username: string) => call<void>("RequestPasswordResetCode", username),
+  resetPasswordWithCode: (username: string, code: string, newPassword: string) => call<void>("ResetPasswordWithCode", username, code, newPassword),
+  resetPasswordWithSecurityAnswer: (username: string, answer: string, newPassword: string) => call<void>("ResetPasswordWithSecurityAnswer", username, answer, newPassword),
+  logout: async () => { if (sessionToken) await authenticatedCall<void>("Logout").catch(() => undefined); sessionToken = ""; },
   dashboard: () => authenticatedCall<DashboardSummary>("GetDashboard"),
   incomeExpenseReport: (period: IncomeExpensePeriod, year: number) => authenticatedCall<IncomeExpenseReport>("GetIncomeExpenseReport", period, year),
   taxReport: (startDate: string, endDate: string, businessId = 0) => authenticatedCall<TaxReportSummary>("GetTaxReport", startDate, endDate, businessId),
@@ -622,6 +778,8 @@ export const api = {
   listCustomerLookup: (search = "", kind = "all") => authenticatedCall<CustomerLookup[]>("ListCustomerLookup", search, kind),
   saveCustomer: (customer: Partial<Customer>) => authenticatedCall<Customer>("SaveCustomer", customer),
   deleteCustomer: (id: number) => authenticatedCall<void>("DeleteCustomer", id),
+  mergeCustomers: (sourceId: number, targetId: number) => authenticatedCall<Customer>("MergeCustomers", sourceId, targetId),
+  monthlySummary: (year: number, month: number, businessId = 0) => authenticatedCall<MonthlySummary>("GetMonthlySummary", year, month, businessId),
   listVendors: (search = "") => authenticatedCall<Vendor[]>("ListVendors", search),
   saveVendor: (vendor: Partial<Vendor>) => authenticatedCall<Vendor>("SaveVendor", vendor),
   deleteVendor: (id: number) => authenticatedCall<void>("DeleteVendor", id),
@@ -630,7 +788,7 @@ export const api = {
   deletePurchase: (id: number) => authenticatedCall<void>("DeletePurchase", id),
   listInvoices: (search = "") => authenticatedCall<InvoiceListItem[]>("ListInvoices", search),
   getInvoice: (id: number) => authenticatedCall<InvoiceDetail>("GetInvoice", id),
-  createInvoice: (invoice: InvoiceInput) => authenticatedCall<unknown>("CreateInvoice", invoice),
+  createInvoice: (invoice: InvoiceInput) => authenticatedCall<InvoiceDetail>("CreateInvoice", invoice),
   recordWalkInService: (entry: WalkInServiceInput) => authenticatedCall<unknown>("RecordWalkInService", entry),
   deleteInvoice: (id: number) => authenticatedCall<void>("DeleteInvoice", id),
   exportInvoicePDF: (id: number) => authenticatedCall<string>("ExportInvoicePDF", id),

@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"net/mail"
 	"os"
 	"strconv"
 	"strings"
@@ -47,10 +48,11 @@ func (r *Repository) EnsureDefaultAdmin(ctx context.Context) error {
 func (r *Repository) GetUserByUsername(ctx context.Context, username string) (*User, error) {
 	var user User
 	err := r.db.QueryRowContext(ctx, `
-		select id, username, display_name, password_hash, role, access_label, active
+		select id, username, display_name, password_hash, role, access_label, active,
+			recovery_email, security_question, security_answer_hash
 		from users
 		where lower(username) = lower($1) and active = true
-	`, strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active)
+	`, strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active, &user.RecoveryEmail, &user.SecurityQuestion, &user.SecurityAnswerHash)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +61,8 @@ func (r *Repository) GetUserByUsername(ctx context.Context, username string) (*U
 
 func (r *Repository) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		select id, username, display_name, '' as password_hash, role, access_label, active
+		select id, username, display_name, '' as password_hash, role, access_label, active,
+			recovery_email, security_question, '' as security_answer_hash
 		from users
 		order by active desc, display_name asc
 	`)
@@ -71,7 +74,7 @@ func (r *Repository) ListUsers(ctx context.Context) ([]User, error) {
 	users := []User{}
 	for rows.Next() {
 		var user User
-		if err := rows.Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active); err != nil {
+		if err := rows.Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active, &user.RecoveryEmail, &user.SecurityQuestion, &user.SecurityAnswerHash); err != nil {
 			return nil, err
 		}
 		users = append(users, user)
@@ -93,6 +96,18 @@ func (r *Repository) SaveUser(ctx context.Context, input UserInput) (*User, erro
 		return nil, fmt.Errorf("invalid role: must be admin or standard")
 	}
 	accessLabel := fallback(input.AccessLabel, "Full Access")
+	input.RecoveryEmail = strings.ToLower(strings.TrimSpace(input.RecoveryEmail))
+	if input.RecoveryEmail != "" {
+		address, err := mail.ParseAddress(input.RecoveryEmail)
+		if err != nil || address.Address != input.RecoveryEmail {
+			return nil, fmt.Errorf("recovery email must be a valid email address")
+		}
+	}
+	input.SecurityQuestion = strings.TrimSpace(input.SecurityQuestion)
+	input.SecurityAnswer = strings.TrimSpace(input.SecurityAnswer)
+	if input.SecurityAnswer != "" && input.SecurityQuestion == "" {
+		return nil, fmt.Errorf("security question is required when setting an answer")
+	}
 	if input.ID == 0 {
 		if strings.TrimSpace(input.Password) == "" {
 			return nil, fmt.Errorf("password is required")
@@ -104,12 +119,19 @@ func (r *Repository) SaveUser(ctx context.Context, input UserInput) (*User, erro
 		if err != nil {
 			return nil, err
 		}
+		answerHash := ""
+		if input.SecurityAnswer != "" {
+			answerHash, err = security.HashPassword(normalizeSecurityAnswer(input.SecurityAnswer))
+			if err != nil {
+				return nil, err
+			}
+		}
 		var user User
 		err = r.db.QueryRowContext(ctx, `
-			insert into users(username, display_name, password_hash, role, access_label, active)
-			values($1,$2,$3,$4,$5,true)
-			returning id, username, display_name, '' as password_hash, role, access_label, active
-		`, input.Username, input.DisplayName, hash, role, accessLabel).Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active)
+			insert into users(username, display_name, password_hash, role, access_label, active, recovery_email, security_question, security_answer_hash)
+			values($1,$2,$3,$4,$5,true,$6,$7,$8)
+			returning id, username, display_name, '' as password_hash, role, access_label, active, recovery_email, security_question, '' as security_answer_hash
+		`, input.Username, input.DisplayName, hash, role, accessLabel, input.RecoveryEmail, input.SecurityQuestion, answerHash).Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active, &user.RecoveryEmail, &user.SecurityQuestion, &user.SecurityAnswerHash)
 		return &user, err
 	}
 
@@ -125,18 +147,62 @@ func (r *Repository) SaveUser(ctx context.Context, input UserInput) (*User, erro
 			return nil, err
 		}
 	}
+	if input.SecurityQuestion == "" {
+		if _, err := r.db.ExecContext(ctx, `update users set security_answer_hash='' where id=$1`, input.ID); err != nil {
+			return nil, err
+		}
+	} else if input.SecurityAnswer != "" {
+		answerHash, err := security.HashPassword(normalizeSecurityAnswer(input.SecurityAnswer))
+		if err != nil {
+			return nil, err
+		}
+		if _, err := r.db.ExecContext(ctx, `update users set security_answer_hash=$1 where id=$2`, answerHash, input.ID); err != nil {
+			return nil, err
+		}
+	}
 	var user User
 	err := r.db.QueryRowContext(ctx, `
 		update users
-		set username=$1, display_name=$2, role=$3, access_label=$4, active=$5, updated_at=now()
-		where id=$6
-		returning id, username, display_name, '' as password_hash, role, access_label, active
-	`, input.Username, input.DisplayName, role, accessLabel, input.Active, input.ID).Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active)
+		set username=$1, display_name=$2, role=$3, access_label=$4, active=$5,
+			recovery_email=$6, security_question=$7, updated_at=now()
+		where id=$8
+		returning id, username, display_name, '' as password_hash, role, access_label, active, recovery_email, security_question, '' as security_answer_hash
+	`, input.Username, input.DisplayName, role, accessLabel, input.Active, input.RecoveryEmail, input.SecurityQuestion, input.ID).Scan(&user.ID, &user.Username, &user.DisplayName, &user.PasswordHash, &user.Role, &user.AccessLabel, &user.Active, &user.RecoveryEmail, &user.SecurityQuestion, &user.SecurityAnswerHash)
 	return &user, err
 }
 
+func (r *Repository) UpdatePassword(ctx context.Context, userID int64, password string) error {
+	if utf8.RuneCountInString(password) < 10 {
+		return fmt.Errorf("password must be at least 10 characters")
+	}
+	hash, err := security.HashPassword(password)
+	if err != nil {
+		return err
+	}
+	result, err := r.db.ExecContext(ctx, `update users set password_hash=$1, updated_at=now() where id=$2 and active=true`, hash, userID)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return fmt.Errorf("active user not found")
+	}
+	return nil
+}
+
+func normalizeSecurityAnswer(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(value), " "))
+}
+
+func VerifySecurityAnswer(user *User, answer string) bool {
+	return user != nil && user.SecurityAnswerHash != "" && security.VerifyPassword(normalizeSecurityAnswer(answer), user.SecurityAnswerHash)
+}
+
 func (r *Repository) ListBusinesses(ctx context.Context) ([]Business, error) {
-	rows, err := r.db.QueryContext(ctx, `select id, name, active from businesses order by active desc, name asc`)
+	rows, err := r.db.QueryContext(ctx, `select id, name, active, payment_instructions, check_payable_to from businesses order by active desc, name asc`)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +211,7 @@ func (r *Repository) ListBusinesses(ctx context.Context) ([]Business, error) {
 	businesses := []Business{}
 	for rows.Next() {
 		var business Business
-		if err := rows.Scan(&business.ID, &business.Name, &business.Active); err != nil {
+		if err := rows.Scan(&business.ID, &business.Name, &business.Active, &business.PaymentInstructions, &business.CheckPayableTo); err != nil {
 			return nil, err
 		}
 		businesses = append(businesses, business)
@@ -164,18 +230,18 @@ func (r *Repository) SaveBusiness(ctx context.Context, input BusinessInput) (*Bu
 	var business Business
 	if input.ID == 0 {
 		err := r.db.QueryRowContext(ctx, `
-			insert into businesses(name, active)
-			values($1, true)
+			insert into businesses(name, active, payment_instructions, check_payable_to)
+			values($1, true, $2, $3)
 			on conflict (name) do update set active=true, updated_at=now()
-			returning id, name, active
-		`, name).Scan(&business.ID, &business.Name, &business.Active)
+			returning id, name, active, payment_instructions, check_payable_to
+		`, name, strings.TrimSpace(input.PaymentInstructions), strings.TrimSpace(input.CheckPayableTo)).Scan(&business.ID, &business.Name, &business.Active, &business.PaymentInstructions, &business.CheckPayableTo)
 		return &business, err
 	}
 	err := r.db.QueryRowContext(ctx, `
-		update businesses set name=$1, active=$2, updated_at=now()
+		update businesses set name=$1, active=$2, payment_instructions=$4, check_payable_to=$5, updated_at=now()
 		where id=$3
-		returning id, name, active
-	`, name, input.Active, input.ID).Scan(&business.ID, &business.Name, &business.Active)
+		returning id, name, active, payment_instructions, check_payable_to
+	`, name, input.Active, input.ID, strings.TrimSpace(input.PaymentInstructions), strings.TrimSpace(input.CheckPayableTo)).Scan(&business.ID, &business.Name, &business.Active, &business.PaymentInstructions, &business.CheckPayableTo)
 	return &business, err
 }
 
@@ -229,8 +295,70 @@ func (r *Repository) SaveCustomer(ctx context.Context, input CustomerInput) (*Cu
 }
 
 func (r *Repository) DeleteCustomer(ctx context.Context, id int64) error {
-	_, err := r.db.ExecContext(ctx, `delete from customers where id=$1`, id)
-	return err
+	var invoiceCount int
+	if err := r.db.QueryRowContext(ctx, `select count(*) from invoices where customer_id=$1`, id).Scan(&invoiceCount); err != nil {
+		return err
+	}
+	if invoiceCount > 0 {
+		return fmt.Errorf("this customer has %d invoice(s); delete those entries first, or use Merge into another customer to move them", invoiceCount)
+	}
+	result, err := r.db.ExecContext(ctx, `delete from customers where id=$1`, id)
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err == nil && rows == 0 {
+		return fmt.Errorf("customer not found")
+	}
+	return nil
+}
+
+// MergeCustomers moves every invoice from sourceID to targetID, fills any blank
+// contact fields on the target from the source, then deletes the source record.
+// Used to clean up duplicate customers created by manual entry.
+func (r *Repository) MergeCustomers(ctx context.Context, sourceID int64, targetID int64) (*Customer, error) {
+	if sourceID == 0 || targetID == 0 {
+		return nil, fmt.Errorf("choose both customers to merge")
+	}
+	if sourceID == targetID {
+		return nil, fmt.Errorf("cannot merge a customer into itself")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var found int
+	if err := tx.QueryRowContext(ctx, `select count(*) from customers where id in ($1, $2)`, sourceID, targetID).Scan(&found); err != nil {
+		return nil, err
+	}
+	if found != 2 {
+		return nil, fmt.Errorf("customer not found")
+	}
+	if _, err := tx.ExecContext(ctx, `
+		update customers t set
+			company_name = case when t.company_name = '' then s.company_name else t.company_name end,
+			email = case when t.email = '' then s.email else t.email end,
+			phone = case when t.phone = '' then s.phone else t.phone end,
+			billing_address = case when t.billing_address = '' then s.billing_address else t.billing_address end,
+			service_address = case when t.service_address = '' then s.service_address else t.service_address end,
+			notes = case when s.notes = '' or s.notes = t.notes then t.notes when t.notes = '' then s.notes else t.notes || E'\n' || s.notes end,
+			updated_at = now()
+		from customers s
+		where t.id = $2 and s.id = $1
+	`, sourceID, targetID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `update invoices set customer_id=$2, updated_at=now() where customer_id=$1`, sourceID, targetID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `delete from customers where id=$1`, sourceID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.getCustomer(ctx, targetID)
 }
 
 func (r *Repository) ListVendors(ctx context.Context, search string) ([]Vendor, error) {
@@ -404,8 +532,12 @@ func (r *Repository) DeleteInvoice(ctx context.Context, id int64) error {
 	if _, err := tx.ExecContext(ctx, `update purchases set related_invoice_id=null where related_invoice_id=$1`, id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `delete from invoices where id=$1`, id); err != nil {
+	result, err := tx.ExecContext(ctx, `delete from invoices where id=$1`, id)
+	if err != nil {
 		return err
+	}
+	if rows, err := result.RowsAffected(); err == nil && rows == 0 {
+		return fmt.Errorf("entry not found (it may already be deleted)")
 	}
 	return tx.Commit()
 }
@@ -679,7 +811,7 @@ func (r *Repository) GetInvoice(ctx context.Context, id int64) (*InvoiceDetail, 
 			i.status, i.subtotal, i.discount_amount, i.tax_amount, i.total_amount, i.paid_amount,
 			coalesce((select p.payment_date::text from payments p where p.invoice_id = i.id order by p.payment_date desc, p.id desc limit 1), ''),
 			coalesce((select p.method from payments p where p.invoice_id = i.id order by p.payment_date desc, p.id desc limit 1), ''),
-			i.notes, i.terms, i.created_at::text, i.updated_at::text
+			i.notes, i.terms, i.created_at::text, i.updated_at::text, coalesce(b.payment_instructions, ''), coalesce(b.check_payable_to, '')
 		from invoices i
 		join customers c on c.id = i.customer_id
 		left join businesses b on b.id = i.business_id
@@ -687,7 +819,7 @@ func (r *Repository) GetInvoice(ctx context.Context, id int64) (*InvoiceDetail, 
 	`, id).Scan(
 		&invoice.ID, &invoice.BusinessID, &invoice.BusinessName, &invoice.InvoiceNumber, &invoice.InvoiceDate, &invoice.DueDate,
 		&invoice.Customer.ID, &invoice.Customer.FullName, &invoice.Customer.CompanyName, &invoice.Customer.Email, &invoice.Customer.Phone, &invoice.Customer.BillingAddress, &invoice.Customer.ServiceAddress, &invoice.Customer.TaxExempt, &invoice.Customer.Notes, &invoice.Customer.CreatedAt, &invoice.Customer.UpdatedAt,
-		&invoice.Status, &invoice.Subtotal, &invoice.DiscountAmount, &invoice.TaxAmount, &invoice.TotalAmount, &invoice.PaidAmount, &invoice.PaymentDate, &invoice.PaymentMethod, &invoice.Notes, &invoice.Terms, &invoice.CreatedAt, &invoice.UpdatedAt,
+		&invoice.Status, &invoice.Subtotal, &invoice.DiscountAmount, &invoice.TaxAmount, &invoice.TotalAmount, &invoice.PaidAmount, &invoice.PaymentDate, &invoice.PaymentMethod, &invoice.Notes, &invoice.Terms, &invoice.CreatedAt, &invoice.UpdatedAt, &invoice.PaymentInstructions, &invoice.CheckPayableTo,
 	)
 	if err != nil {
 		return nil, err
@@ -1300,4 +1432,160 @@ func fallback(value string, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// GetMonthlySummary returns income, customers and every income entry for one
+// month (month 1-12) or the whole year (month 0), plus a 12-month overview.
+// businessID 0 means all businesses. Entries that share customer name, date
+// and total are flagged as possible duplicates.
+func (r *Repository) GetMonthlySummary(ctx context.Context, year int, month int, businessID int64) (*MonthlySummary, error) {
+	if year == 0 {
+		year = time.Now().Year()
+	}
+	if month < 0 || month > 12 {
+		return nil, fmt.Errorf("invalid month")
+	}
+	summary := &MonthlySummary{
+		Year:       year,
+		Month:      month,
+		BusinessID: businessID,
+		Months:     []MonthlySummaryMonth{},
+		Customers:  []MonthlySummaryCustomer{},
+		Entries:    []MonthlySummaryEntry{},
+	}
+
+	monthRows, err := r.db.QueryContext(ctx, `
+		with months as (select generate_series(1, 12) as m),
+		inc as (
+			select extract(month from invoice_date)::int as m,
+				sum(total_amount) as income, sum(paid_amount) as collected,
+				count(*)::int as invoice_count, count(distinct customer_id)::int as customer_count
+			from invoices
+			where extract(year from invoice_date)::int = $1 and ($2::bigint = 0 or business_id = $2)
+			group by 1
+		),
+		exp as (
+			select extract(month from purchase_date)::int as m, sum(amount) as expense
+			from purchases
+			where extract(year from purchase_date)::int = $1 and ($2::bigint = 0 or business_id = $2)
+			group by 1
+		)
+		select months.m, to_char(make_date($1, months.m, 1), 'Mon'),
+			coalesce(inc.income, 0), coalesce(inc.collected, 0), coalesce(exp.expense, 0),
+			coalesce(inc.invoice_count, 0), coalesce(inc.customer_count, 0)
+		from months
+		left join inc on inc.m = months.m
+		left join exp on exp.m = months.m
+		order by months.m
+	`, year, businessID)
+	if err != nil {
+		return nil, err
+	}
+	for monthRows.Next() {
+		var row MonthlySummaryMonth
+		if err := monthRows.Scan(&row.Month, &row.Label, &row.Income, &row.Collected, &row.Expense, &row.InvoiceCount, &row.CustomerCount); err != nil {
+			monthRows.Close()
+			return nil, err
+		}
+		summary.Months = append(summary.Months, row)
+	}
+	monthRows.Close()
+	if err := monthRows.Err(); err != nil {
+		return nil, err
+	}
+
+	start := time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(1, 0, 0)
+	if month > 0 {
+		start = time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+		end = start.AddDate(0, 1, 0)
+	}
+
+	if err := r.db.QueryRowContext(ctx, `
+		select coalesce(sum(amount), 0) from purchases
+		where purchase_date >= $1 and purchase_date < $2 and ($3::bigint = 0 or business_id = $3)
+	`, start, end, businessID).Scan(&summary.Expense); err != nil {
+		return nil, err
+	}
+
+	entryRows, err := r.db.QueryContext(ctx, `
+		with scoped as (
+			select i.*,
+				count(*) over (partition by lower(trim(c.full_name)), i.invoice_date, i.total_amount, coalesce(i.business_id, 0)) as dupe_count
+			from invoices i
+			join customers c on c.id = i.customer_id
+			where i.invoice_date >= $1 and i.invoice_date < $2 and ($3::bigint = 0 or i.business_id = $3)
+		)
+		select s.id, coalesce(b.id, 0), coalesce(b.name, ''), s.invoice_number, s.invoice_date::text, s.due_date::text,
+			c.full_name, s.status, s.total_amount, s.paid_amount, s.created_at::text, c.id,
+			s.dupe_count > 1,
+			(select count(*)::int from invoice_items ii where ii.invoice_id = s.id),
+			s.discount_amount = 0
+				and (select count(*) from invoice_items ii where ii.invoice_id = s.id and ii.item_type = 'labor') <= 1
+				and (select count(*) from invoice_items ii where ii.invoice_id = s.id and ii.item_type = 'parts') <= 1
+				and (select count(*) from invoice_items ii where ii.invoice_id = s.id and ii.item_type = 'other') = 0,
+			coalesce((select p.method from payments p where p.invoice_id = s.id order by p.payment_date desc, p.id desc limit 1), '')
+		from scoped s
+		join customers c on c.id = s.customer_id
+		left join businesses b on b.id = s.business_id
+		order by s.invoice_date desc, s.id desc
+	`, start, end, businessID)
+	if err != nil {
+		return nil, err
+	}
+	for entryRows.Next() {
+		var e MonthlySummaryEntry
+		if err := entryRows.Scan(&e.ID, &e.BusinessID, &e.BusinessName, &e.InvoiceNumber, &e.InvoiceDate, &e.DueDate,
+			&e.CustomerName, &e.Status, &e.TotalAmount, &e.PaidAmount, &e.CreatedAt, &e.CustomerID,
+			&e.PossibleDupe, &e.ItemCount, &e.WalkInEntry, &e.PaymentMethod); err != nil {
+			entryRows.Close()
+			return nil, err
+		}
+		summary.Entries = append(summary.Entries, e)
+		summary.Income += e.TotalAmount
+		summary.Collected += e.PaidAmount
+		if e.PossibleDupe {
+			summary.DuplicateCount++
+		}
+	}
+	entryRows.Close()
+	if err := entryRows.Err(); err != nil {
+		return nil, err
+	}
+
+	customerRows, err := r.db.QueryContext(ctx, `
+		select c.id, c.full_name, c.company_name, c.phone, c.email,
+			count(i.id)::int, coalesce(sum(i.total_amount), 0), coalesce(sum(i.paid_amount), 0),
+			min(i.invoice_date)::text, max(i.invoice_date)::text,
+			(select count(*)::int from customers d where d.id <> c.id and lower(trim(d.full_name)) = lower(trim(c.full_name)))
+		from invoices i
+		join customers c on c.id = i.customer_id
+		where i.invoice_date >= $1 and i.invoice_date < $2 and ($3::bigint = 0 or i.business_id = $3)
+		group by c.id
+		order by coalesce(sum(i.total_amount), 0) desc, c.full_name asc
+	`, start, end, businessID)
+	if err != nil {
+		return nil, err
+	}
+	for customerRows.Next() {
+		var c MonthlySummaryCustomer
+		if err := customerRows.Scan(&c.CustomerID, &c.FullName, &c.CompanyName, &c.Phone, &c.Email, &c.InvoiceCount, &c.Income, &c.Collected, &c.FirstVisit, &c.LastVisit, &c.PossibleDupes); err != nil {
+			customerRows.Close()
+			return nil, err
+		}
+		summary.Customers = append(summary.Customers, c)
+	}
+	customerRows.Close()
+	if err := customerRows.Err(); err != nil {
+		return nil, err
+	}
+
+	summary.Income = roundMoney(summary.Income)
+	summary.Collected = roundMoney(summary.Collected)
+	summary.Outstanding = roundMoney(summary.Income - summary.Collected)
+	summary.Expense = roundMoney(summary.Expense)
+	summary.Net = roundMoney(summary.Income - summary.Expense)
+	summary.InvoiceCount = len(summary.Entries)
+	summary.CustomerCount = len(summary.Customers)
+	return summary, nil
 }

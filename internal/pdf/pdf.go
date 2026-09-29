@@ -29,7 +29,11 @@ func WriteInvoice(invoice *repository.InvoiceDetail, settings *repository.AppSet
 
 func buildInvoiceText(invoice *repository.InvoiceDetail, settings *repository.AppSettings) string {
 	var lines []string
-	lines = append(lines, settings.BusinessName)
+	name := invoice.BusinessName
+	if name == "" {
+		name = settings.BusinessName
+	}
+	lines = append(lines, name)
 	if settings.BusinessAddress != "" {
 		lines = append(lines, settings.BusinessAddress)
 	}
@@ -54,13 +58,15 @@ func buildInvoiceText(invoice *repository.InvoiceDetail, settings *repository.Ap
 	}
 	lines = append(lines, "")
 	lines = append(lines, "Items")
-	lines = append(lines, "Description                         Qty       Unit       Tax     Total")
+	lines = append(lines, "Description                         Qty       Rate       Tax     Total")
 	lines = append(lines, "-----------------------------------------------------------------------")
 	for _, item := range invoice.Items {
 		taxable := "No"
 		if item.Taxable {
 			taxable = "Yes"
 		}
+		kind := map[string]string{"labor": "Service Charge", "parts": "Parts", "other": "Other"}[item.ItemType]
+		lines = append(lines, kind)
 		lines = append(lines, fmt.Sprintf("%-32s %8.2f %10.2f %7s %10.2f", truncate(item.Description, 32), item.Quantity, item.UnitPrice, taxable, item.LineTotal))
 	}
 	lines = append(lines, "")
@@ -70,6 +76,16 @@ func buildInvoiceText(invoice *repository.InvoiceDetail, settings *repository.Ap
 	lines = append(lines, fmt.Sprintf("Total:           $%10.2f", invoice.TotalAmount))
 	lines = append(lines, fmt.Sprintf("Paid:            $%10.2f", invoice.PaidAmount))
 	lines = append(lines, "")
+	if invoice.PaymentInstructions != "" || invoice.CheckPayableTo != "" {
+		lines = append(lines, "PAYMENT INFORMATION")
+		if invoice.PaymentInstructions != "" {
+			lines = append(lines, invoice.PaymentInstructions)
+		}
+		if invoice.CheckPayableTo != "" {
+			lines = append(lines, "Make all checks payable to "+invoice.CheckPayableTo+".")
+		}
+		lines = append(lines, "")
+	}
 	if invoice.Notes != "" {
 		lines = append(lines, "Notes: "+invoice.Notes)
 	}
@@ -80,22 +96,49 @@ func buildInvoiceText(invoice *repository.InvoiceDetail, settings *repository.Ap
 }
 
 func renderSimplePDF(lines []string) string {
-	var content bytes.Buffer
-	content.WriteString("BT\n/F1 11 Tf\n50 780 Td\n14 TL\n")
+	var wrapped []string
 	for _, line := range lines {
-		content.WriteString("(")
-		content.WriteString(escapePDF(line))
-		content.WriteString(") Tj\nT*\n")
+		for _, paragraph := range strings.Split(strings.ReplaceAll(line, "\r", ""), "\n") {
+			for len([]rune(paragraph)) > 78 {
+				chars := []rune(paragraph)
+				cut := 78
+				for i := 78; i > 35; i-- {
+					if chars[i] == ' ' {
+						cut = i
+						break
+					}
+				}
+				wrapped = append(wrapped, string(chars[:cut]))
+				paragraph = strings.TrimLeft(string(chars[cut:]), " ")
+			}
+			wrapped = append(wrapped, paragraph)
+		}
 	}
-	content.WriteString("ET\n")
-
-	objects := []string{
-		"<< /Type /Catalog /Pages 2 0 R >>",
-		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-		fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", content.Len(), content.String()),
+	const perPage = 49
+	pages := (len(wrapped) + perPage - 1) / perPage
+	if pages == 0 {
+		pages = 1
 	}
+	objects := []string{"<< /Type /Catalog /Pages 2 0 R >>", "", "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>"}
+	var kids []string
+	for page := 0; page < pages; page++ {
+		pageID := len(objects) + 1
+		kids = append(kids, fmt.Sprintf("%d 0 R", pageID))
+		var content bytes.Buffer
+		content.WriteString("BT\n/F1 10 Tf\n50 750 Td\n14 TL\n")
+		end := (page + 1) * perPage
+		if end > len(wrapped) {
+			end = len(wrapped)
+		}
+		for _, line := range wrapped[page*perPage : end] {
+			content.WriteString("(" + escapePDF(line) + ") Tj\nT*\n")
+		}
+		content.WriteString("ET\n")
+		objects = append(objects,
+			fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>", pageID+1),
+			fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", content.Len(), content.String()))
+	}
+	objects[1] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), pages)
 
 	var pdf bytes.Buffer
 	pdf.WriteString("%PDF-1.4\n")

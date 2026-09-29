@@ -3,23 +3,35 @@ package repository
 import "time"
 
 type User struct {
-	ID           int64  `json:"id"`
-	Username     string `json:"username"`
-	DisplayName  string `json:"displayName"`
-	PasswordHash string `json:"-"`
-	Role         string `json:"role"`
-	AccessLabel  string `json:"accessLabel"`
-	Active       bool   `json:"active"`
+	ID                 int64  `json:"id"`
+	Username           string `json:"username"`
+	DisplayName        string `json:"displayName"`
+	PasswordHash       string `json:"-"`
+	Role               string `json:"role"`
+	AccessLabel        string `json:"accessLabel"`
+	Active             bool   `json:"active"`
+	RecoveryEmail      string `json:"recoveryEmail"`
+	SecurityQuestion   string `json:"securityQuestion"`
+	SecurityAnswerHash string `json:"-"`
 }
 
 type UserInput struct {
-	ID          int64  `json:"id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"displayName"`
-	Password    string `json:"password"`
-	Role        string `json:"role"`
-	AccessLabel string `json:"accessLabel"`
-	Active      bool   `json:"active"`
+	ID               int64  `json:"id"`
+	Username         string `json:"username"`
+	DisplayName      string `json:"displayName"`
+	Password         string `json:"password"`
+	Role             string `json:"role"`
+	AccessLabel      string `json:"accessLabel"`
+	Active           bool   `json:"active"`
+	RecoveryEmail    string `json:"recoveryEmail"`
+	SecurityQuestion string `json:"securityQuestion"`
+	SecurityAnswer   string `json:"securityAnswer"`
+}
+
+type PasswordRecoveryOptions struct {
+	SecurityQuestion string `json:"securityQuestion"`
+	EmailAvailable   bool   `json:"emailAvailable"`
+	MaskedEmail      string `json:"maskedEmail"`
 }
 
 type AuthSession struct {
@@ -165,26 +177,28 @@ type InvoiceItem struct {
 }
 
 type InvoiceDetail struct {
-	ID             int64         `json:"id"`
-	BusinessID     int64         `json:"businessId"`
-	BusinessName   string        `json:"businessName"`
-	InvoiceNumber  string        `json:"invoiceNumber"`
-	InvoiceDate    string        `json:"invoiceDate"`
-	DueDate        string        `json:"dueDate"`
-	Customer       Customer      `json:"customer"`
-	Status         string        `json:"status"`
-	Subtotal       float64       `json:"subtotal"`
-	DiscountAmount float64       `json:"discountAmount"`
-	TaxAmount      float64       `json:"taxAmount"`
-	TotalAmount    float64       `json:"totalAmount"`
-	PaidAmount     float64       `json:"paidAmount"`
-	PaymentDate    string        `json:"paymentDate"`
-	PaymentMethod  string        `json:"paymentMethod"`
-	Notes          string        `json:"notes"`
-	Terms          string        `json:"terms"`
-	Items          []InvoiceItem `json:"items"`
-	CreatedAt      string        `json:"createdAt"`
-	UpdatedAt      string        `json:"updatedAt"`
+	PaymentInstructions string        `json:"paymentInstructions"`
+	CheckPayableTo      string        `json:"checkPayableTo"`
+	ID                  int64         `json:"id"`
+	BusinessID          int64         `json:"businessId"`
+	BusinessName        string        `json:"businessName"`
+	InvoiceNumber       string        `json:"invoiceNumber"`
+	InvoiceDate         string        `json:"invoiceDate"`
+	DueDate             string        `json:"dueDate"`
+	Customer            Customer      `json:"customer"`
+	Status              string        `json:"status"`
+	Subtotal            float64       `json:"subtotal"`
+	DiscountAmount      float64       `json:"discountAmount"`
+	TaxAmount           float64       `json:"taxAmount"`
+	TotalAmount         float64       `json:"totalAmount"`
+	PaidAmount          float64       `json:"paidAmount"`
+	PaymentDate         string        `json:"paymentDate"`
+	PaymentMethod       string        `json:"paymentMethod"`
+	Notes               string        `json:"notes"`
+	Terms               string        `json:"terms"`
+	Items               []InvoiceItem `json:"items"`
+	CreatedAt           string        `json:"createdAt"`
+	UpdatedAt           string        `json:"updatedAt"`
 }
 
 type InvoiceListItem struct {
@@ -249,15 +263,19 @@ type IncomeExpenseReportItem struct {
 }
 
 type Business struct {
-	ID     int64  `json:"id"`
-	Name   string `json:"name"`
-	Active bool   `json:"active"`
+	PaymentInstructions string `json:"paymentInstructions"`
+	CheckPayableTo      string `json:"checkPayableTo"`
+	ID                  int64  `json:"id"`
+	Name                string `json:"name"`
+	Active              bool   `json:"active"`
 }
 
 type BusinessInput struct {
-	ID     int64  `json:"id"`
-	Name   string `json:"name"`
-	Active bool   `json:"active"`
+	PaymentInstructions string `json:"paymentInstructions"`
+	CheckPayableTo      string `json:"checkPayableTo"`
+	ID                  int64  `json:"id"`
+	Name                string `json:"name"`
+	Active              bool   `json:"active"`
 }
 
 type TaxReportSummary struct {
@@ -286,4 +304,54 @@ type EmailInvoiceInput struct {
 	To        string `json:"to"`
 	Subject   string `json:"subject"`
 	Message   string `json:"message"`
+}
+
+type MonthlySummaryMonth struct {
+	Month         int     `json:"month"`
+	Label         string  `json:"label"`
+	Income        float64 `json:"income"`
+	Collected     float64 `json:"collected"`
+	Expense       float64 `json:"expense"`
+	InvoiceCount  int     `json:"invoiceCount"`
+	CustomerCount int     `json:"customerCount"`
+}
+
+type MonthlySummaryCustomer struct {
+	CustomerID    int64   `json:"customerId"`
+	FullName      string  `json:"fullName"`
+	CompanyName   string  `json:"companyName"`
+	Phone         string  `json:"phone"`
+	Email         string  `json:"email"`
+	InvoiceCount  int     `json:"invoiceCount"`
+	Income        float64 `json:"income"`
+	Collected     float64 `json:"collected"`
+	FirstVisit    string  `json:"firstVisit"`
+	LastVisit     string  `json:"lastVisit"`
+	PossibleDupes int     `json:"possibleDuplicates"`
+}
+
+type MonthlySummaryEntry struct {
+	InvoiceListItem
+	CustomerID    int64  `json:"customerId"`
+	PossibleDupe  bool   `json:"possibleDuplicate"`
+	ItemCount     int    `json:"itemCount"`
+	WalkInEntry   bool   `json:"walkInEntry"`
+	PaymentMethod string `json:"paymentMethod"`
+}
+
+type MonthlySummary struct {
+	Year           int                      `json:"year"`
+	Month          int                      `json:"month"`
+	BusinessID     int64                    `json:"businessId"`
+	Income         float64                  `json:"income"`
+	Collected      float64                  `json:"collected"`
+	Outstanding    float64                  `json:"outstanding"`
+	Expense        float64                  `json:"expense"`
+	Net            float64                  `json:"net"`
+	InvoiceCount   int                      `json:"invoiceCount"`
+	CustomerCount  int                      `json:"customerCount"`
+	DuplicateCount int                      `json:"duplicateCount"`
+	Months         []MonthlySummaryMonth    `json:"months"`
+	Customers      []MonthlySummaryCustomer `json:"customers"`
+	Entries        []MonthlySummaryEntry    `json:"entries"`
 }

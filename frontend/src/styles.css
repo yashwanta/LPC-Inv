@@ -83,6 +83,14 @@ nav { display: grid; gap: 3px; }
 .dark .loginPanel { background: #1d2421; border-color: #334139; }
 .loginHeader { display: flex; align-items: center; justify-content: space-between; }
 .loginPanel h1 { margin: 4px 0 6px; font-size: 28px; }
+.recoveryChoices { display: grid; gap: 10px; }
+.recoveryChoices p { margin: 0 0 4px; color: #5e7067; font-size: 14px; }
+.dark .recoveryChoices p { color: #aebbb5; }
+.recoveryPrompt { padding: 12px; border-radius: 6px; background: #eef3f0; color: #29473b; font-weight: 700; }
+.dark .recoveryPrompt { background: #26312c; color: #dce8e2; }
+.linkButton { border: 0; background: transparent; color: #1f6f58; font-weight: 700; padding: 5px; }
+.linkButton:hover { text-decoration: underline; }
+.dark .linkButton { color: #78cbb0; }
 
 .contentStack { display: grid; gap: 18px; }
 .metricGrid { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 12px; }
@@ -184,7 +192,7 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .dark .stateMessage { background: #25302b; color: #becac4; }
 
 .lineEditor { display: grid; gap: 8px; }
-.invoiceLine { display: grid; grid-template-columns: minmax(84px, 0.9fr) minmax(110px, 1.5fr) minmax(54px, 0.55fr) minmax(70px, 0.7fr) 62px 38px; gap: 6px; align-items: end; }
+.invoiceLine { display: grid; grid-template-columns: minmax(165px, 1.1fr) minmax(110px, 1.5fr) minmax(54px, 0.55fr) minmax(70px, 0.7fr) 62px 38px; gap: 6px; align-items: end; }
 .invoiceLine > * { min-width: 0; }
 .invoiceLine label { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; border: 1px solid #cbd7d1; border-radius: 6px; }
 .invoiceLine label input { width: 15px; min-height: 15px; }
@@ -416,4 +424,64 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 @media (max-width: 1100px) {
   .settingsGrid, .lookupToolbar { grid-template-columns: 1fr; }
   .lookupRow { grid-template-columns: minmax(180px, 1fr) minmax(160px, 1fr); }
+}
+
+.customerDialog { border: 0; padding: 0; border-radius: 12px; width: min(580px, 94vw); max-height: 90vh; color: inherit; background: var(--panel, white); }
+.customerDialog::backdrop { background: rgb(0 0 0 / 45%); }
+.customerDialog .formPanel { margin: 0; }
+.paymentInformation { padding: 14px; border: 1px solid #bdd6cb; border-radius: 8px; white-space: pre-wrap; }
+.paymentInformation p { margin: 7px 0 0; }
+.lineHeadings { font-size: 12px; font-weight: 600; }
+.invoicePreview { grid-column: 1 / -1; }
+.lineEditor { overflow-x: auto; }
+.invoiceLine { min-width: 560px; }
+
+/* Monthly summary, confirm dialog, duplicate handling */
+.fullRow { grid-column: 1 / -1; display: grid; gap: 8px; }
+.sessionBanner { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 20; box-shadow: 0 6px 20px rgb(0 0 0 / 15%); }
+.confirmDialog { width: min(460px, 94vw); }
+.confirmMessage { margin: 4px 0 8px; line-height: 1.5; }
+.sectionTitle small { color: #66786f; font-weight: 500; margin-left: auto; }
+.pill.warning { background: #fff1d6; color: #7a4b00; margin-left: 6px; }
+.dark .pill.warning { background: #4a3a17; color: #ffe2a8; }
+.selectedRow { border-color: #1f6f58 !important; box-shadow: inset 3px 0 0 #1f6f58; }
+.mergePanel { display: grid; gap: 6px; padding: 12px; border: 1px dashed #cbd7d1; border-radius: 8px; }
+.mergePanel strong { display: inline-flex; align-items: center; gap: 6px; }
+.mergePanel small { color: #66786f; }
+.dark .mergePanel { border-color: #44564d; }
+.mergeRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.monthlyToolbar { display: grid; grid-template-columns: auto minmax(200px, 260px) minmax(260px, 1fr); gap: 12px; align-items: end; }
+.monthlyToolbar .searchBox { margin-bottom: 0; }
+.yearStepper { display: inline-flex; align-items: center; gap: 10px; min-height: 38px; }
+.yearStepper strong { font-size: 20px; min-width: 52px; text-align: center; }
+.monthStrip { display: grid; grid-template-columns: repeat(13, minmax(0, 1fr)); gap: 6px; }
+.monthTile { position: relative; display: grid; gap: 2px; padding: 8px 8px 10px; border: 1px solid #e2e9e5; border-radius: 7px; background: #fbfcfb; color: inherit; text-align: left; overflow: hidden; }
+.monthTile span { font-size: 12px; font-weight: 800; color: #607168; text-transform: uppercase; }
+.monthTile strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.monthTile small { font-size: 11px; color: #66786f; }
+.monthTile:hover { border-color: #1f6f58; }
+.monthTile.active { background: #dcefe7; border-color: #1f6f58; }
+.monthMeter { position: absolute; left: 0; bottom: 0; height: 3px; background: #1f6f58; opacity: 0.55; }
+.dark .monthTile { background: #18201d; border-color: #314039; }
+.dark .monthTile.active { background: #24483d; border-color: #5fb898; }
+.dark .monthTile span, .dark .monthTile small { color: #aebbb5; }
+.warningBanner { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 6px; background: #fff6e5; color: #6b4300; border: 1px solid #f1d399; }
+.warningBanner span { flex: 1; }
+.dark .warningBanner { background: #3b3017; color: #ffe2a8; border-color: #6d5724; }
+.summaryTable { display: grid; gap: 6px; }
+.summaryHeader, .summaryRow { display: grid; gap: 10px; align-items: center; }
+.customerCols { grid-template-columns: minmax(180px, 1.4fr) minmax(160px, 1.2fr) 60px 100px 100px 100px; }
+.entryCols { grid-template-columns: 96px minmax(110px, 0.9fr) minmax(170px, 1.4fr) minmax(90px, 0.8fr) 96px 96px 86px; }
+.summaryHeader { color: #607168; font-size: 12px; font-weight: 800; text-transform: uppercase; padding: 0 10px; }
+.dark .summaryHeader { color: #aebbb5; }
+.summaryRow { min-height: 46px; padding: 8px 10px; border: 1px solid #e2e9e5; border-radius: 6px; background: #fbfcfb; color: inherit; text-align: left; }
+.summaryRow small { display: block; color: #66786f; margin-top: 2px; }
+button.summaryRow:hover { border-color: #1f6f58; }
+.duplicateRow { background: #fffaf0; border-color: #f1d399; }
+.dark .summaryRow { background: #18201d; border-color: #314039; }
+.dark .summaryRow small { color: #aebbb5; }
+.dark .duplicateRow { background: #2c2716; border-color: #6d5724; }
+@media (max-width: 1100px) {
+  .monthStrip { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .monthlyToolbar { grid-template-columns: 1fr; }
 }
