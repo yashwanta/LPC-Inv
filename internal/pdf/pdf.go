@@ -70,9 +70,14 @@ func buildInvoiceText(invoice *repository.InvoiceDetail, settings *repository.Ap
 		lines = append(lines, fmt.Sprintf("%-32s %8.2f %10.2f %7s %10.2f", truncate(item.Description, 32), item.Quantity, item.UnitPrice, taxable, item.LineTotal))
 	}
 	lines = append(lines, "")
-	lines = append(lines, fmt.Sprintf("Subtotal:        $%10.2f", invoice.Subtotal))
-	lines = append(lines, fmt.Sprintf("Discount:        $%10.2f", invoice.DiscountAmount))
-	lines = append(lines, fmt.Sprintf("Sales tax:       $%10.2f", invoice.TaxAmount))
+	if invoice.TaxIncluded {
+		lines = append(lines, fmt.Sprintf("Before tax:      $%10.2f", invoice.Subtotal))
+		lines = append(lines, fmt.Sprintf("KY sales tax (included): $%.2f", invoice.TaxAmount))
+	} else {
+		lines = append(lines, fmt.Sprintf("Subtotal:        $%10.2f", invoice.Subtotal))
+		lines = append(lines, fmt.Sprintf("Discount:        $%10.2f", invoice.DiscountAmount))
+		lines = append(lines, fmt.Sprintf("Sales tax:       $%10.2f", invoice.TaxAmount))
+	}
 	lines = append(lines, fmt.Sprintf("Total:           $%10.2f", invoice.TotalAmount))
 	lines = append(lines, fmt.Sprintf("Paid:            $%10.2f", invoice.PaidAmount))
 	lines = append(lines, "")

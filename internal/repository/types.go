@@ -192,6 +192,7 @@ type InvoiceDetail struct {
 	TaxAmount           float64       `json:"taxAmount"`
 	TotalAmount         float64       `json:"totalAmount"`
 	PaidAmount          float64       `json:"paidAmount"`
+	TaxIncluded         bool          `json:"taxIncluded"`
 	PaymentDate         string        `json:"paymentDate"`
 	PaymentMethod       string        `json:"paymentMethod"`
 	Notes               string        `json:"notes"`
@@ -216,24 +217,25 @@ type InvoiceListItem struct {
 }
 
 type AppSettings struct {
-	BusinessName     string  `json:"businessName"`
-	BusinessAddress  string  `json:"businessAddress"`
-	BusinessPhone    string  `json:"businessPhone"`
-	BusinessEmail    string  `json:"businessEmail"`
-	BusinessLogoPath string  `json:"businessLogoPath"`
-	DefaultTaxRate   float64 `json:"defaultTaxRate"`
-	PartsTaxable     bool    `json:"partsTaxable"`
-	LaborTaxable     bool    `json:"laborTaxable"`
-	InvoiceTerms     string  `json:"invoiceTerms"`
-	InvoicePrefix    string  `json:"invoicePrefix"`
-	Theme            string  `json:"theme"`
-	SMTPHost         string  `json:"smtpHost"`
-	SMTPPort         int     `json:"smtpPort"`
-	SMTPUsername     string  `json:"smtpUsername"`
-	SMTPPassword     string  `json:"smtpPassword"`
-	SMTPFromEmail    string  `json:"smtpFromEmail"`
-	SMTPFromName     string  `json:"smtpFromName"`
-	SMTPUseTLS       bool    `json:"smtpUseTLS"`
+	BusinessName          string  `json:"businessName"`
+	BusinessAddress       string  `json:"businessAddress"`
+	BusinessPhone         string  `json:"businessPhone"`
+	BusinessEmail         string  `json:"businessEmail"`
+	BusinessLogoPath      string  `json:"businessLogoPath"`
+	DefaultTaxRate        float64 `json:"defaultTaxRate"`
+	PartsTaxable          bool    `json:"partsTaxable"`
+	LaborTaxable          bool    `json:"laborTaxable"`
+	LaborTaxableWithParts bool    `json:"laborTaxableWithParts"`
+	InvoiceTerms          string  `json:"invoiceTerms"`
+	InvoicePrefix         string  `json:"invoicePrefix"`
+	Theme                 string  `json:"theme"`
+	SMTPHost              string  `json:"smtpHost"`
+	SMTPPort              int     `json:"smtpPort"`
+	SMTPUsername          string  `json:"smtpUsername"`
+	SMTPPassword          string  `json:"smtpPassword"`
+	SMTPFromEmail         string  `json:"smtpFromEmail"`
+	SMTPFromName          string  `json:"smtpFromName"`
+	SMTPUseTLS            bool    `json:"smtpUseTLS"`
 }
 
 type DashboardSummary struct {

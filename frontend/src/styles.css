@@ -485,3 +485,4 @@ button.summaryRow:hover { border-color: #1f6f58; }
   .monthStrip { grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .monthlyToolbar { grid-template-columns: 1fr; }
 }
+.fieldHint { display: block; color: #66786f; font-size: 12px; font-weight: 500; margin-top: 4px; }

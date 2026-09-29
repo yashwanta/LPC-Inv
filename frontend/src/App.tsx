@@ -511,6 +511,16 @@ function ManualEntry({ editId = null, onEditLoaded }: { editId?: number | null; 
   }, [editId]);
 
   const serviceTotal = service.partsCost + service.serviceCharge;
+  const [taxSettings, setTaxSettings] = useState<Pick<AppSettings, "defaultTaxRate" | "partsTaxable" | "laborTaxable" | "laborTaxableWithParts"> | null>(null);
+  useEffect(() => { api.getSettings().then(setTaxSettings).catch(() => setTaxSettings(null)); }, []);
+  const includedTax = useMemo(() => {
+    if (!taxSettings) return null;
+    const rate = taxSettings.defaultTaxRate > 1 ? taxSettings.defaultTaxRate / 100 : taxSettings.defaultTaxRate;
+    const partsTaxed = taxSettings.partsTaxable && service.partsCost > 0;
+    const laborTaxed = taxSettings.laborTaxable || (taxSettings.laborTaxableWithParts && partsTaxed);
+    const taxable = (partsTaxed ? service.partsCost : 0) + (laborTaxed ? service.serviceCharge : 0);
+    return { rate, tax: Math.round(taxable * rate / (1 + rate) * 100) / 100 };
+  }, [taxSettings, service.partsCost, service.serviceCharge]);
 
   /** Runs an action, shows success or the real error, and never fails silently. */
   async function run(action: () => Promise<void>, success: string) {
@@ -531,11 +541,14 @@ function ManualEntry({ editId = null, onEditLoaded }: { editId?: number | null; 
   async function saveService(event: React.FormEvent) {
     event.preventDefault();
     const updating = Boolean(service.id);
+    let taxNote = "";
     await run(async () => {
-      await api.recordWalkInService(service);
+      const saved = await api.recordWalkInService(service) as InvoiceDetail | undefined;
+      if (saved && typeof saved.taxAmount === "number") taxNote = saved.taxAmount > 0 ? ` · includes ${money(saved.taxAmount)} KY sales tax` : " · no sales tax (labor only)";
       setService({ ...emptyServiceEntry, businessId: service.businessId, serviceDate: today(), paymentDate: today() });
       await load();
     }, updating ? "Walk-in service income updated" : "Walk-in service income saved");
+    if (taxNote) setMessage((current) => current ? current + taxNote : current);
   }
 
   async function savePurchase(event: React.FormEvent) {
@@ -623,7 +636,7 @@ function ManualEntry({ editId = null, onEditLoaded }: { editId?: number | null; 
         <div className="fieldRow"><Input label="Amount paid" type="number" value={String(service.amountPaid)} onChange={(amountPaid) => setService({ ...service, amountPaid: Number(amountPaid) })} /><PaymentMethodSelect value={service.paymentMethod} onChange={(paymentMethod) => setService({ ...service, paymentMethod })} /></div>
         <Input label="Reference" value={service.reference} onChange={(reference) => setService({ ...service, reference })} />
         <TextArea label="Notes" value={service.notes} onChange={(notes) => setService({ ...service, notes })} />
-        <div className="invoiceTotal"><span>Total income</span><strong>{money(serviceTotal)}</strong></div>
+        <div className="invoiceTotal"><span>Total paid by customer{includedTax ? (includedTax.tax > 0 ? ` · includes ${money(includedTax.tax)} sales tax` : " · no sales tax (labor only)") : ""}</span><strong>{money(serviceTotal)}</strong></div>
         <div className="formActions">
           <button className="primaryButton" disabled={busy}><Plus size={16} /> {service.id ? "Update service income" : "Save service income"}</button>
           {service.id ? <button className="ghostButton" type="button" onClick={() => setService({ ...emptyServiceEntry, businessId: service.businessId, serviceDate: today(), paymentDate: today() })}>New entry</button> : null}
@@ -796,7 +809,10 @@ function TaxReports() {
   const [message, setMessage] = useState("");
 
   async function load(nextBusinessId = businessId) {
-    setReport(await api.taxReport(startDate, endDate, nextBusinessId));
+    setMessage("");
+    try {
+      setReport(await api.taxReport(startDate, endDate, nextBusinessId));
+    } catch (err) { setMessage(errorText(err)); }
   }
 
   useEffect(() => {
@@ -829,7 +845,7 @@ function TaxReports() {
   return (
     <section className="contentStack">
       <form className="reportToolbar" onSubmit={refresh}>
-        <BusinessSelect businesses={[{ id: 0, name: "All businesses", active: true }, ...businesses]} value={businessId} onChange={setBusinessId} />
+        <BusinessSelect businesses={[{ id: 0, name: "All businesses", active: true }, ...businesses]} value={businessId} onChange={(next) => { setBusinessId(next); load(next); }} />
         <Input label="Start date" type="date" value={startDate} onChange={setStartDate} />
         <Input label="End date" type="date" value={endDate} onChange={setEndDate} />
         <button className="primaryButton"><ReceiptText size={16} /> Run</button>
@@ -1174,7 +1190,7 @@ function Invoices({ onEdit }: { onEdit: (id: number) => void }) {
         <p>Bill to: {preview.customer.companyName || preview.customer.fullName}</p>
         <p>{preview.invoiceDate} · Due {preview.dueDate}</p>
         {preview.items?.map((item, index) => <p key={index}>{item.itemType === "labor" ? "Service Charge" : item.itemType === "parts" ? "Parts" : "Other"} · {item.description} · {item.quantity} × {money(item.unitPrice)} = {money(item.lineTotal)}</p>)}
-        <div className="invoiceTotal"><span>Total</span><strong>{money(preview.totalAmount)}</strong></div>
+        <div className="invoiceTotal"><span>Total{preview.taxAmount > 0 ? ` · ${preview.taxIncluded ? "includes" : "incl."} ${money(preview.taxAmount)} sales tax` : ""}</span><strong>{money(preview.totalAmount)}</strong></div>
         <PaymentInformation value={preview} />
         <button type="button" className="ghostButton" onClick={() => exportPDF(preview.id)}>Download PDF / open PDF to print</button>
       </section>}
@@ -1484,7 +1500,14 @@ function SettingsPage() {
           <label>Business logo path<input value={currentSettings.businessLogoPath} onChange={(e) => setSettings({ ...currentSettings, businessLogoPath: e.target.value })} /></label>
           <button className="ghostButton" type="button" onClick={chooseLogo}>Choose</button>
         </div>
-        <div className="fieldRow"><Input label="Invoice prefix" value={currentSettings.invoicePrefix} onChange={(invoicePrefix) => setSettings({ ...currentSettings, invoicePrefix })} /><Input label="Default tax rate" type="number" value={String(currentSettings.defaultTaxRate)} onChange={(defaultTaxRate) => setSettings({ ...currentSettings, defaultTaxRate: Number(defaultTaxRate) })} /></div>
+        <div className="fieldRow"><Input label="Invoice prefix" value={currentSettings.invoicePrefix} onChange={(invoicePrefix) => setSettings({ ...currentSettings, invoicePrefix })} /><label>Sales tax rate (%)<input type="number" min="0" max="100" step="0.001" value={String(Math.round((currentSettings.defaultTaxRate > 1 ? currentSettings.defaultTaxRate : currentSettings.defaultTaxRate * 100) * 1000) / 1000)} onChange={(e) => setSettings({ ...currentSettings, defaultTaxRate: Number(e.target.value) / 100 })} /><small className="fieldHint">Kentucky: 6 (no local sales tax)</small></label></div>
+        <section className="paymentInformation">
+          <strong>Sales tax rules</strong>
+          <label className="checkRow"><input type="checkbox" checked={currentSettings.partsTaxable} onChange={(e) => setSettings({ ...currentSettings, partsTaxable: e.target.checked })} /> Parts are taxable</label>
+          <label className="checkRow"><input type="checkbox" checked={currentSettings.laborTaxableWithParts} onChange={(e) => setSettings({ ...currentSettings, laborTaxableWithParts: e.target.checked })} /> Tax labor when parts are installed on the same job (Kentucky rule)</label>
+          <label className="checkRow"><input type="checkbox" checked={currentSettings.laborTaxable} onChange={(e) => setSettings({ ...currentSettings, laborTaxable: e.target.checked })} /> Always tax labor, even with no parts</label>
+          <small className="fieldHint">Walk-in amounts are what the customer paid, with tax included. Created invoices add tax on top.</small>
+        </section>
         <BusinessPaymentSettings />
         <TextArea label="Invoice terms" value={currentSettings.invoiceTerms} onChange={(invoiceTerms) => setSettings({ ...currentSettings, invoiceTerms })} />
       </section>

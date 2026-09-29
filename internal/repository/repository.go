@@ -571,6 +571,12 @@ func (r *Repository) CreateInvoice(ctx context.Context, input InvoiceInput) (*In
 		return nil, err
 	}
 
+	hasTaxableParts := false
+	for _, item := range input.Items {
+		if item.ItemType == "parts" && settings.PartsTaxable && item.Quantity*item.UnitPrice > 0 {
+			hasTaxableParts = true
+		}
+	}
 	var subtotal, taxableSubtotal float64
 	for i := range input.Items {
 		item := &input.Items[i]
@@ -585,7 +591,10 @@ func (r *Repository) CreateInvoice(ctx context.Context, input InvoiceInput) (*In
 			item.Taxable = settings.PartsTaxable
 		}
 		if item.ItemType == "labor" {
-			item.Taxable = settings.LaborTaxable
+			item.Taxable = laborIsTaxable(settings, hasTaxableParts)
+		}
+		if customer.TaxExempt {
+			item.Taxable = false
 		}
 		lineTotal := roundMoney(item.Quantity * item.UnitPrice)
 		subtotal += lineTotal
@@ -688,9 +697,27 @@ func (r *Repository) RecordWalkInService(ctx context.Context, input WalkInServic
 		return nil, err
 	}
 
-	subtotal := roundMoney(partsCost + serviceCharge)
+	// Walk-in prices are what the customer paid, with Kentucky sales tax included.
+	// Parts are taxable; labor is taxable when it installs taxable parts on the same job.
+	var customerTaxExempt bool
+	if err := tx.QueryRowContext(ctx, `select tax_exempt from customers where id=$1`, customerID).Scan(&customerTaxExempt); err != nil {
+		return nil, err
+	}
+	partsTaxable := settings.PartsTaxable && partsCost > 0 && !customerTaxExempt
+	laborTaxable := laborIsTaxable(settings, partsTaxable) && !customerTaxExempt
+	taxableGross := 0.0
+	if partsTaxable {
+		taxableGross += partsCost
+	}
+	if laborTaxable {
+		taxableGross += serviceCharge
+	}
+	total := roundMoney(partsCost + serviceCharge)
 	tax := 0.0
-	total := subtotal
+	if settings.DefaultTaxRate > 0 && taxableGross > 0 {
+		tax = roundMoney(taxableGross * settings.DefaultTaxRate / (1 + settings.DefaultTaxRate))
+	}
+	subtotal := roundMoney(total - tax)
 
 	notes := buildServiceNotes(input)
 
@@ -702,8 +729,8 @@ func (r *Repository) RecordWalkInService(ctx context.Context, input WalkInServic
 		}
 		invoiceNumber := fmt.Sprintf("%s-%06d", settings.InvoicePrefix, sequence)
 		err = tx.QueryRowContext(ctx, `
-			insert into invoices(business_id, invoice_number, invoice_date, due_date, customer_id, subtotal, tax_amount, total_amount, notes, terms)
-			values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			insert into invoices(business_id, invoice_number, invoice_date, due_date, customer_id, subtotal, tax_amount, total_amount, notes, terms, tax_included)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)
 			returning id
 		`, businessID, invoiceNumber, serviceDate, serviceDate, customerID, subtotal, tax, total, notes, fallback(settings.InvoiceTerms, "Payment due on receipt.")).Scan(&invoiceID)
 		if err != nil {
@@ -712,7 +739,7 @@ func (r *Repository) RecordWalkInService(ctx context.Context, input WalkInServic
 	} else {
 		result, err := tx.ExecContext(ctx, `
 			update invoices
-			set business_id=$1, invoice_date=$2, due_date=$2, customer_id=$3, subtotal=$4, discount_amount=0, tax_amount=$5, total_amount=$6, notes=$7, terms=$8, updated_at=now()
+			set business_id=$1, invoice_date=$2, due_date=$2, customer_id=$3, subtotal=$4, discount_amount=0, tax_amount=$5, total_amount=$6, notes=$7, terms=$8, tax_included=true, updated_at=now()
 			where id=$9
 		`, businessID, serviceDate, customerID, subtotal, tax, total, notes, fallback(settings.InvoiceTerms, "Payment due on receipt."), invoiceID)
 		if err != nil {
@@ -734,7 +761,7 @@ func (r *Repository) RecordWalkInService(ctx context.Context, input WalkInServic
 		if _, err := tx.ExecContext(ctx, `
 			insert into invoice_items(invoice_id, item_type, description, quantity, unit_price, taxable, line_total, position)
 			values($1,'labor',$2,1,$3,$4,$3,$5)
-		`, invoiceID, fallback(description, "Walk-in service charge"), serviceCharge, settings.LaborTaxable, position); err != nil {
+		`, invoiceID, fallback(description, "Walk-in service charge"), serviceCharge, laborTaxable, position); err != nil {
 			return nil, err
 		}
 		position++
@@ -743,7 +770,7 @@ func (r *Repository) RecordWalkInService(ctx context.Context, input WalkInServic
 		if _, err := tx.ExecContext(ctx, `
 			insert into invoice_items(invoice_id, item_type, description, quantity, unit_price, taxable, line_total, position)
 			values($1,'parts',$2,1,$3,$4,$3,$5)
-		`, invoiceID, fallback(input.Solution, "Parts"), partsCost, settings.PartsTaxable, position); err != nil {
+		`, invoiceID, fallback(input.Solution, "Parts"), partsCost, partsTaxable, position); err != nil {
 			return nil, err
 		}
 	}
@@ -808,7 +835,7 @@ func (r *Repository) GetInvoice(ctx context.Context, id int64) (*InvoiceDetail, 
 	err := r.db.QueryRowContext(ctx, `
 		select i.id, coalesce(b.id, 0), coalesce(b.name, ''), i.invoice_number, i.invoice_date::text, i.due_date::text,
 			c.id, c.full_name, c.company_name, c.email, c.phone, c.billing_address, c.service_address, c.tax_exempt, c.notes, c.created_at::text, c.updated_at::text,
-			i.status, i.subtotal, i.discount_amount, i.tax_amount, i.total_amount, i.paid_amount,
+			i.status, i.subtotal, i.discount_amount, i.tax_amount, i.total_amount, i.paid_amount, i.tax_included,
 			coalesce((select p.payment_date::text from payments p where p.invoice_id = i.id order by p.payment_date desc, p.id desc limit 1), ''),
 			coalesce((select p.method from payments p where p.invoice_id = i.id order by p.payment_date desc, p.id desc limit 1), ''),
 			i.notes, i.terms, i.created_at::text, i.updated_at::text, coalesce(b.payment_instructions, ''), coalesce(b.check_payable_to, '')
@@ -819,7 +846,7 @@ func (r *Repository) GetInvoice(ctx context.Context, id int64) (*InvoiceDetail, 
 	`, id).Scan(
 		&invoice.ID, &invoice.BusinessID, &invoice.BusinessName, &invoice.InvoiceNumber, &invoice.InvoiceDate, &invoice.DueDate,
 		&invoice.Customer.ID, &invoice.Customer.FullName, &invoice.Customer.CompanyName, &invoice.Customer.Email, &invoice.Customer.Phone, &invoice.Customer.BillingAddress, &invoice.Customer.ServiceAddress, &invoice.Customer.TaxExempt, &invoice.Customer.Notes, &invoice.Customer.CreatedAt, &invoice.Customer.UpdatedAt,
-		&invoice.Status, &invoice.Subtotal, &invoice.DiscountAmount, &invoice.TaxAmount, &invoice.TotalAmount, &invoice.PaidAmount, &invoice.PaymentDate, &invoice.PaymentMethod, &invoice.Notes, &invoice.Terms, &invoice.CreatedAt, &invoice.UpdatedAt, &invoice.PaymentInstructions, &invoice.CheckPayableTo,
+		&invoice.Status, &invoice.Subtotal, &invoice.DiscountAmount, &invoice.TaxAmount, &invoice.TotalAmount, &invoice.PaidAmount, &invoice.TaxIncluded, &invoice.PaymentDate, &invoice.PaymentMethod, &invoice.Notes, &invoice.Terms, &invoice.CreatedAt, &invoice.UpdatedAt, &invoice.PaymentInstructions, &invoice.CheckPayableTo,
 	)
 	if err != nil {
 		return nil, err
@@ -890,24 +917,25 @@ func (r *Repository) SaveSettings(ctx context.Context, input AppSettings) (*AppS
 		return nil, err
 	}
 	values := map[string]string{
-		"business_name":      input.BusinessName,
-		"business_address":   input.BusinessAddress,
-		"business_phone":     input.BusinessPhone,
-		"business_email":     input.BusinessEmail,
-		"business_logo_path": input.BusinessLogoPath,
-		"default_tax_rate":   fmt.Sprintf("%.4f", input.DefaultTaxRate),
-		"parts_taxable":      strconv.FormatBool(input.PartsTaxable),
-		"labor_taxable":      strconv.FormatBool(input.LaborTaxable),
-		"invoice_terms":      input.InvoiceTerms,
-		"invoice_prefix":     fallback(input.InvoicePrefix, "INV"),
-		"theme":              fallback(input.Theme, "light"),
-		"smtp_host":          input.SMTPHost,
-		"smtp_port":          strconv.Itoa(input.SMTPPort),
-		"smtp_username":      input.SMTPUsername,
-		"smtp_password":      smtpPassword,
-		"smtp_from_email":    input.SMTPFromEmail,
-		"smtp_from_name":     input.SMTPFromName,
-		"smtp_use_tls":       strconv.FormatBool(input.SMTPUseTLS),
+		"business_name":            input.BusinessName,
+		"business_address":         input.BusinessAddress,
+		"business_phone":           input.BusinessPhone,
+		"business_email":           input.BusinessEmail,
+		"business_logo_path":       input.BusinessLogoPath,
+		"default_tax_rate":         fmt.Sprintf("%.4f", normalizeTaxRate(input.DefaultTaxRate)),
+		"parts_taxable":            strconv.FormatBool(input.PartsTaxable),
+		"labor_taxable":            strconv.FormatBool(input.LaborTaxable),
+		"labor_taxable_with_parts": strconv.FormatBool(input.LaborTaxableWithParts),
+		"invoice_terms":            input.InvoiceTerms,
+		"invoice_prefix":           fallback(input.InvoicePrefix, "INV"),
+		"theme":                    fallback(input.Theme, "light"),
+		"smtp_host":                input.SMTPHost,
+		"smtp_port":                strconv.Itoa(input.SMTPPort),
+		"smtp_username":            input.SMTPUsername,
+		"smtp_password":            smtpPassword,
+		"smtp_from_email":          input.SMTPFromEmail,
+		"smtp_from_name":           input.SMTPFromName,
+		"smtp_use_tls":             strconv.FormatBool(input.SMTPUseTLS),
 	}
 	for key, value := range values {
 		_, err := r.db.ExecContext(ctx, `
@@ -941,24 +969,25 @@ func (r *Repository) GetSettings(ctx context.Context) (*AppSettings, error) {
 		return nil, err
 	}
 	settings := &AppSettings{
-		BusinessName:     fallback(values["business_name"], "SimpleTech Books"),
-		BusinessAddress:  values["business_address"],
-		BusinessPhone:    values["business_phone"],
-		BusinessEmail:    values["business_email"],
-		BusinessLogoPath: values["business_logo_path"],
-		DefaultTaxRate:   parseFloat(values["default_tax_rate"]),
-		PartsTaxable:     parseBool(values["parts_taxable"], true),
-		LaborTaxable:     parseBool(values["labor_taxable"], false),
-		InvoiceTerms:     values["invoice_terms"],
-		InvoicePrefix:    fallback(values["invoice_prefix"], "INV"),
-		Theme:            fallback(values["theme"], "light"),
-		SMTPHost:         values["smtp_host"],
-		SMTPPort:         parseInt(values["smtp_port"], 587),
-		SMTPUsername:     values["smtp_username"],
-		SMTPPassword:     smtpPassword,
-		SMTPFromEmail:    values["smtp_from_email"],
-		SMTPFromName:     values["smtp_from_name"],
-		SMTPUseTLS:       parseBool(values["smtp_use_tls"], true),
+		BusinessName:          fallback(values["business_name"], "SimpleTech Books"),
+		BusinessAddress:       values["business_address"],
+		BusinessPhone:         values["business_phone"],
+		BusinessEmail:         values["business_email"],
+		BusinessLogoPath:      values["business_logo_path"],
+		DefaultTaxRate:        normalizeTaxRate(parseFloat(values["default_tax_rate"])),
+		PartsTaxable:          parseBool(values["parts_taxable"], true),
+		LaborTaxable:          parseBool(values["labor_taxable"], false),
+		LaborTaxableWithParts: parseBool(values["labor_taxable_with_parts"], true),
+		InvoiceTerms:          values["invoice_terms"],
+		InvoicePrefix:         fallback(values["invoice_prefix"], "INV"),
+		Theme:                 fallback(values["theme"], "light"),
+		SMTPHost:              values["smtp_host"],
+		SMTPPort:              parseInt(values["smtp_port"], 587),
+		SMTPUsername:          values["smtp_username"],
+		SMTPPassword:          smtpPassword,
+		SMTPFromEmail:         values["smtp_from_email"],
+		SMTPFromName:          values["smtp_from_name"],
+		SMTPUseTLS:            parseBool(values["smtp_use_tls"], true),
 	}
 	return settings, rows.Err()
 }
@@ -1102,11 +1131,17 @@ func (r *Repository) GetTaxReport(ctx context.Context, startDate string, endDate
 		from invoices
 		where invoice_date between $1 and $2 and ($3::bigint = 0 or business_id = $3)
 	`, start, end, businessID).Scan(&report.GrossSales, &report.SalesTaxCollected)
+	// Taxable sales exclude the tax itself: for tax-included (walk-in) entries the
+	// taxable lines contain the tax, so it is subtracted back out.
 	_ = r.db.QueryRowContext(ctx, `
-		select coalesce(sum(ii.line_total), 0)
-		from invoice_items ii
-		join invoices i on i.id = ii.invoice_id
-		where i.invoice_date between $1 and $2 and ii.taxable = true and ($3::bigint = 0 or i.business_id = $3)
+		select coalesce(sum(t.taxable_gross - case when t.tax_included then t.tax_amount else 0 end), 0)
+		from (
+			select i.id, i.tax_included, i.tax_amount, sum(ii.line_total) as taxable_gross
+			from invoice_items ii
+			join invoices i on i.id = ii.invoice_id
+			where i.invoice_date between $1 and $2 and ii.taxable = true and ($3::bigint = 0 or i.business_id = $3)
+			group by i.id, i.tax_included, i.tax_amount
+		) t
 	`, start, end, businessID).Scan(&report.TaxableSales)
 	report.NonTaxableSales = roundMoney(math.Max(0, report.GrossSales-report.TaxableSales))
 	_ = r.db.QueryRowContext(ctx, `
@@ -1588,4 +1623,25 @@ func (r *Repository) GetMonthlySummary(ctx context.Context, year int, month int,
 	summary.InvoiceCount = len(summary.Entries)
 	summary.CustomerCount = len(summary.Customers)
 	return summary, nil
+}
+
+// normalizeTaxRate stores rates as fractions (0.06). A value above 1 was typed as
+// a percent ("6"), so it is converted instead of being applied as 600%.
+func normalizeTaxRate(rate float64) float64 {
+	if rate > 1 {
+		rate = rate / 100
+	}
+	if rate < 0 {
+		return 0
+	}
+	return math.Round(rate*10000) / 10000
+}
+
+// laborIsTaxable applies the settings plus the Kentucky rule that labor to install
+// taxable parts sold on the same job is taxable (labor-only repairs are not).
+func laborIsTaxable(settings *AppSettings, jobHasTaxableParts bool) bool {
+	if settings.LaborTaxable {
+		return true
+	}
+	return settings.LaborTaxableWithParts && jobHasTaxableParts
 }

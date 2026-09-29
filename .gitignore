@@ -14,3 +14,4 @@ coverage.out
 dist/
 .tmp/
 cmd/installer/payload/*.exe
+tax-diagnostic.txt

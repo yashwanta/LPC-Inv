@@ -1,6 +1,10 @@
 # SimpleTech Books - local release: backup DB, bump version, commit, build, push.
 # Safe for existing data: the build never touches PostgreSQL. A full pg_dump backup
 # is taken first, and row counts are printed before and after for comparison.
+param(
+    [string]$Title = "",
+    [string]$Body = ""
+)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
@@ -72,22 +76,10 @@ try {
     Invoke-Native git @('add', '-A')
     & git status --short
     $msgFile = Join-Path $env:TEMP "simpletech-commit-$stamp.txt"
-    $msg = @"
-Release $new`: monthly summary, safe edit/delete, duplicate cleanup
-
-- New Monthly Summary page: income, collected, expenses and customers per
-  month or full year, with every income entry and edit/delete actions
-- Flags possible double entries (same customer name, date and amount)
-- Merge duplicate customers (moves invoices, then removes the duplicate)
-- Edit/Delete on the Invoices page; Manual Entry shows 10 recent entries
-- In-app confirm dialog instead of window.confirm (unreliable in WebView2)
-- All save/edit/delete errors are now shown; expired sessions return to sign-in
-- Clear error when deleting a customer that still has invoices
-- Block walk-in edits that would drop multi-line invoice items
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01H5XEvCznqbqrc4Y83xgFMj
-"@
+    if ([string]::IsNullOrWhiteSpace($Title)) { $Title = $env:RELEASE_TITLE }
+    if ([string]::IsNullOrWhiteSpace($Body)) { $Body = $env:RELEASE_BODY }
+    if ([string]::IsNullOrWhiteSpace($Title)) { $Title = "update" }
+    $msg = "Release $new`: $Title`n`n$Body`n`nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`nClaude-Session: https://claude.ai/code/session_01H5XEvCznqbqrc4Y83xgFMj`n"
     [IO.File]::WriteAllText($msgFile, $msg)
     Invoke-Native git @('commit', '-F', $msgFile)
     Remove-Item $msgFile -ErrorAction SilentlyContinue

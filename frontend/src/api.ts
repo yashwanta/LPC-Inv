@@ -182,6 +182,7 @@ export type InvoiceDetail = {
   taxAmount: number;
   totalAmount: number;
   paidAmount: number;
+  taxIncluded?: boolean;
   notes: string;
   terms: string;
   paymentDate: string;
@@ -210,6 +211,7 @@ export type AppSettings = {
   defaultTaxRate: number;
   partsTaxable: boolean;
   laborTaxable: boolean;
+  laborTaxableWithParts: boolean;
   invoiceTerms: string;
   invoicePrefix: string;
   theme: string;
@@ -336,9 +338,10 @@ let demoSettings: AppSettings = {
   businessPhone: "555-0199",
   businessEmail: "service@simpletech.local",
   businessLogoPath: "C:\\Logos\\simpletech-logo.png",
-  defaultTaxRate: 0.07,
+  defaultTaxRate: 0.06,
   partsTaxable: true,
   laborTaxable: false,
+  laborTaxableWithParts: true,
   invoiceTerms: "Payment due by due date. Thank you for your business.",
   invoicePrefix: "INV",
   theme: "light",
